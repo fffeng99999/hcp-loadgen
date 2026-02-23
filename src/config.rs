@@ -441,7 +441,7 @@ impl Default for Config {
             group_size: 0,
             subblock_parallelism: 0,
             storage_sharing_factor: 0,
-            database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcp_server?sslmode=disable".to_string(),
+            database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcp_server?sslmode=disable&search_path=loadgendata,public".to_string(),
             storage_flush_interval_ms: 2000,
             storage_channel_size: 10000,
             storage_max_connections: 4,
