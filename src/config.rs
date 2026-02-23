@@ -10,6 +10,12 @@ pub struct Config {
     pub protocol: Protocol,
     pub http_endpoint: String,
     pub grpc_endpoint: String,
+    pub rpc_endpoint: String,
+    pub chain_id: String,
+    pub keyring_backend: String,
+    pub keyring_home: Option<String>,
+    pub account_file: Option<String>,
+    pub cli_binary: String,
     pub mode: SendMode,
     pub target_tps: u64,
     pub duration: u64,
@@ -36,6 +42,7 @@ pub struct Config {
     pub message_count_per_tx: usize,
     pub gas_limit: u64,
     pub fee_amount: u64,
+    pub send_amount: u64,
     pub denom: String,
     pub memo_size: usize,
     pub timeout_height: u64,
@@ -195,6 +202,18 @@ struct Cli {
     #[arg(long)]
     grpc_endpoint: Option<String>,
     #[arg(long)]
+    rpc_endpoint: Option<String>,
+    #[arg(long)]
+    chain_id: Option<String>,
+    #[arg(long)]
+    keyring_backend: Option<String>,
+    #[arg(long)]
+    keyring_home: Option<String>,
+    #[arg(long)]
+    account_file: Option<String>,
+    #[arg(long)]
+    cli_binary: Option<String>,
+    #[arg(long)]
     mode: Option<String>,
     #[arg(long)]
     target_tps: Option<u64>,
@@ -246,6 +265,8 @@ struct Cli {
     gas_limit: Option<u64>,
     #[arg(long)]
     fee_amount: Option<u64>,
+    #[arg(long)]
+    send_amount: Option<u64>,
     #[arg(long)]
     denom: Option<String>,
     #[arg(long)]
@@ -366,6 +387,12 @@ impl Default for Config {
             protocol: Protocol::Http,
             http_endpoint: "http://127.0.0.1:8080/tx".to_string(),
             grpc_endpoint: "http://127.0.0.1:9090".to_string(),
+            rpc_endpoint: "tcp://127.0.0.1:26657".to_string(),
+            chain_id: "hcp-testnet-1".to_string(),
+            keyring_backend: "test".to_string(),
+            keyring_home: None,
+            account_file: None,
+            cli_binary: std::env::var("HCPD_BINARY").unwrap_or_else(|_| "hcpd".to_string()),
             mode: SendMode::Fixed,
             target_tps: 1000,
             duration: 0,
@@ -392,6 +419,7 @@ impl Default for Config {
             message_count_per_tx: 1,
             gas_limit: 200_000,
             fee_amount: 1,
+            send_amount: 1,
             denom: "uhcp".to_string(),
             memo_size: 0,
             timeout_height: 0,
@@ -482,6 +510,24 @@ pub fn load_config() -> Result<Config> {
     if let Some(grpc_endpoint) = cli.grpc_endpoint {
         config.grpc_endpoint = grpc_endpoint;
     }
+    if let Some(rpc_endpoint) = cli.rpc_endpoint {
+        config.rpc_endpoint = rpc_endpoint;
+    }
+    if let Some(chain_id) = cli.chain_id {
+        config.chain_id = chain_id;
+    }
+    if let Some(keyring_backend) = cli.keyring_backend {
+        config.keyring_backend = keyring_backend;
+    }
+    if let Some(keyring_home) = cli.keyring_home {
+        config.keyring_home = Some(keyring_home);
+    }
+    if let Some(account_file) = cli.account_file {
+        config.account_file = Some(account_file);
+    }
+    if let Some(cli_binary) = cli.cli_binary {
+        config.cli_binary = cli_binary;
+    }
     if let Some(mode) = cli.mode {
         config.mode = parse_mode(&mode);
     }
@@ -559,6 +605,9 @@ pub fn load_config() -> Result<Config> {
     }
     if let Some(fee_amount) = cli.fee_amount {
         config.fee_amount = fee_amount;
+    }
+    if let Some(send_amount) = cli.send_amount {
+        config.send_amount = send_amount;
     }
     if let Some(denom) = cli.denom {
         config.denom = denom;

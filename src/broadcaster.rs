@@ -80,6 +80,11 @@ impl Broadcaster for GrpcBroadcaster {
             .as_ref()
             .map(|tx| tx.code == 0)
             .unwrap_or(false);
+        if let Some(tx) = response.get_ref().tx_response.as_ref() {
+            if tx.code != 0 {
+                eprintln!("grpc broadcast rejected: code={} log={}", tx.code, tx.raw_log);
+            }
+        }
         Ok(SendResult {
             latency_ms,
             success,

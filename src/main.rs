@@ -14,6 +14,7 @@ use config::{load_config, Protocol};
 use metrics::Metrics;
 use scheduler::Scheduler;
 use storage::{Storage, StorageConfig};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -39,6 +40,10 @@ async fn main() -> Result<()> {
         config.initial_balance,
         storage.clone(),
         100,
+        config
+            .account_file
+            .as_ref()
+            .map(|path| PathBuf::from(path)),
     )
     .await;
     let broadcaster: Arc<dyn Broadcaster> = match config.protocol {

@@ -7,6 +7,9 @@ use crate::storage::{Storage, TransactionRecord};
 use crate::tx_builder::{TxBuilder, TxKind};
 use anyhow::Result;
 use rand::Rng;
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{watch, Semaphore};
@@ -161,15 +164,61 @@ impl Scheduler {
         let metrics = self.metrics.clone();
         let storage = self.storage.clone();
         let gas_limit = self.config.gas_limit as i64;
-        let amount = self.config.fee_amount as i64;
+        let amount = self.config.send_amount as i64;
+        let use_cli = self.config.keyring_home.is_some() && self.config.account_file.is_some();
+        let config = self.config.clone();
         tokio::spawn(async move {
             let account = pool.next_account();
             let nonce = account.next_nonce();
             let mut tx = builder.build_tx(&account, nonce);
-            let preimage = format!("{}:{}:{}", tx.from, tx.nonce, tx.payload_hex);
-            let signature = signer.sign(&account.private_key, preimage.as_bytes());
-            tx.signature_hex = hex::encode(signature);
-            let payload = builder.encode_tx(&tx);
+            let payload = if use_cli {
+                let from_name = match account.name.as_ref() {
+                    Some(name) => name.clone(),
+                    None => {
+                        metrics.record_reject(0.0);
+                        drop(permit);
+                        return;
+                    }
+                };
+                let keyring_home = match config.keyring_home.as_ref() {
+                    Some(home) => home.clone(),
+                    None => {
+                        metrics.record_reject(0.0);
+                        drop(permit);
+                        return;
+                    }
+                };
+                let result = build_cli_tx_bytes(
+                    &config,
+                    &from_name,
+                    &tx.to,
+                    amount,
+                    &keyring_home,
+                )
+                .await;
+                match result {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        eprintln!("build cli tx failed: {}", err);
+                        metrics.record_reject(0.0);
+                        drop(permit);
+                        return;
+                    }
+                }
+            } else {
+                let private_key = match account.private_key {
+                    Some(private_key) => private_key,
+                    None => {
+                        metrics.record_reject(0.0);
+                        drop(permit);
+                        return;
+                    }
+                };
+                let preimage = format!("{}:{}:{}", tx.from, tx.nonce, tx.payload_hex);
+                let signature = signer.sign(&private_key, preimage.as_bytes());
+                tx.signature_hex = hex::encode(signature);
+                builder.encode_tx(&tx)
+            };
             metrics.record_sent();
             let (success, latency_ms) = match broadcaster.send(payload).await {
                 Ok(result) => {
@@ -180,7 +229,8 @@ impl Scheduler {
                     }
                     (result.success, result.latency_ms)
                 }
-                Err(_) => {
+                Err(err) => {
+                    eprintln!("broadcast error: {}", err);
                     metrics.record_reject(0.0);
                     (false, 0.0)
                 }
@@ -223,6 +273,121 @@ impl Scheduler {
         }
         false
     }
+}
+
+async fn build_cli_tx_bytes(
+    config: &Config,
+    from_name: &str,
+    to_address: &str,
+    amount: i64,
+    keyring_home: &str,
+) -> Result<Vec<u8>> {
+    let amount_arg = format!("{}{}", amount.max(1), config.denom);
+    let fees_arg = format!("{}{}", config.fee_amount.max(1), config.denom);
+    let unsigned = tokio::task::spawn_blocking({
+        let cli_binary = config.cli_binary.clone();
+        let chain_id = config.chain_id.clone();
+        let keyring_backend = config.keyring_backend.clone();
+        let rpc_endpoint = config.rpc_endpoint.clone();
+        let gas_limit = config.gas_limit.to_string();
+        let from_name = from_name.to_string();
+        let to_address = to_address.to_string();
+        let keyring_home = keyring_home.to_string();
+        move || {
+            run_cli(
+                &cli_binary,
+                &[
+                    "tx",
+                    "bank",
+                    "send",
+                    &from_name,
+                    &to_address,
+                    &amount_arg,
+                    "--generate-only",
+                    "--output",
+                    "json",
+                    "--chain-id",
+                    &chain_id,
+                    "--keyring-backend",
+                    &keyring_backend,
+                    "--home",
+                    &keyring_home,
+                    "--node",
+                    &rpc_endpoint,
+                    "--gas",
+                    &gas_limit,
+                    "--fees",
+                    &fees_arg,
+                ],
+                None,
+            )
+        }
+    })
+    .await??;
+    let signed = tokio::task::spawn_blocking({
+        let cli_binary = config.cli_binary.clone();
+        let chain_id = config.chain_id.clone();
+        let keyring_backend = config.keyring_backend.clone();
+        let rpc_endpoint = config.rpc_endpoint.clone();
+        let from_name = from_name.to_string();
+        let keyring_home = keyring_home.to_string();
+        move || {
+            run_cli(
+                &cli_binary,
+                &[
+                    "tx",
+                    "sign",
+                    "-",
+                    "--from",
+                    &from_name,
+                    "--chain-id",
+                    &chain_id,
+                    "--keyring-backend",
+                    &keyring_backend,
+                    "--home",
+                    &keyring_home,
+                    "--node",
+                    &rpc_endpoint,
+                    "--output",
+                    "json",
+                ],
+                Some(&unsigned),
+            )
+        }
+    })
+    .await??;
+    let encoded = tokio::task::spawn_blocking({
+        let cli_binary = config.cli_binary.clone();
+        move || run_cli(&cli_binary, &["tx", "encode", "-"], Some(&signed))
+    })
+    .await??;
+    let payload = encoded.trim();
+    Ok(STANDARD.decode(payload)?)
+}
+
+fn run_cli(binary: &str, args: &[&str], input: Option<&str>) -> Result<String> {
+    let mut command = Command::new(binary);
+    command.args(args);
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    if let Some(input) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(input.as_bytes())?;
+        }
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "cli failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn now_ms() -> u128 {

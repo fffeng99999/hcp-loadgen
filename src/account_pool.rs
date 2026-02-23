@@ -1,13 +1,17 @@
 use crate::storage::{AccountRecord, Storage, UserRecord};
 use rand::RngCore;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Account {
+    pub name: Option<String>,
     pub address: String,
-    pub private_key: [u8; 32],
+    pub private_key: Option<[u8; 32]>,
     nonce: AtomicU64,
 }
 
@@ -30,18 +34,41 @@ impl AccountPool {
         _initial_balance: u64,
         storage: Option<Storage>,
         user_account_pairs: usize,
+        account_file: Option<PathBuf>,
     ) -> Self {
         let mut accounts = Vec::with_capacity(count);
-        for _ in 0..count {
-            let mut private_key = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut private_key);
-            let address = derive_address(&private_key);
-            let account = Arc::new(Account {
-                address,
-                private_key,
-                nonce: AtomicU64::new(initial_nonce),
-            });
-            accounts.push(account);
+        if let Some(path) = account_file {
+            if let Ok(contents) = fs::read_to_string(path) {
+                for line in contents.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if let Ok(record) = serde_json::from_str::<AccountFileRecord>(line) {
+                        let account = Arc::new(Account {
+                            name: Some(record.name),
+                            address: record.address,
+                            private_key: None,
+                            nonce: AtomicU64::new(initial_nonce),
+                        });
+                        accounts.push(account);
+                    }
+                }
+            }
+        }
+        if accounts.is_empty() {
+            for _ in 0..count {
+                let mut private_key = [0u8; 32];
+                rand::thread_rng().fill_bytes(&mut private_key);
+                let address = derive_address(&private_key);
+                let account = Arc::new(Account {
+                    name: None,
+                    address,
+                    private_key: Some(private_key),
+                    nonce: AtomicU64::new(initial_nonce),
+                });
+                accounts.push(account);
+            }
         }
         if let Some(storage) = storage {
             let pair_count = user_account_pairs.min(accounts.len());
@@ -72,7 +99,10 @@ impl AccountPool {
                     .enqueue_account(AccountRecord {
                         username: account_id,
                         email: account_email,
-                        password_hash: derive_fingerprint(&account.private_key),
+                        password_hash: account
+                            .private_key
+                            .map(|private_key| derive_fingerprint(&private_key))
+                            .unwrap_or_else(|| account.address.clone()),
                         role: "account".to_string(),
                         status: "active".to_string(),
                     })
@@ -94,6 +124,12 @@ impl AccountPool {
     pub fn addresses(&self) -> Vec<String> {
         self.accounts.iter().map(|a| a.address.clone()).collect()
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct AccountFileRecord {
+    name: String,
+    address: String,
 }
 
 fn derive_address(private_key: &[u8; 32]) -> String {
