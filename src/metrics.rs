@@ -34,6 +34,7 @@ struct MetricsInner {
     prom_mem: IntGauge,
     csv: Option<Mutex<csv::Writer<File>>>,
     output: OutputConfig,
+    metrics_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,7 +55,7 @@ pub struct MetricsSnapshot {
 }
 
 impl Metrics {
-    pub fn new(output: OutputConfig) -> Result<Self> {
+    pub fn new(output: OutputConfig, metrics_interval_ms: u64) -> Result<Self> {
         let registry = Registry::new();
         let prom_sent = IntCounter::new("hcp_loadgen_sent_total", "sent total")?;
         let prom_success = IntCounter::new("hcp_loadgen_success_total", "success total")?;
@@ -114,6 +115,7 @@ impl Metrics {
                 prom_mem,
                 csv,
                 output,
+                metrics_interval_ms,
             }),
         })
     }
@@ -200,7 +202,7 @@ impl Metrics {
     pub fn start_background(&self) {
         let metrics = self.clone();
         tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_millis(metrics.inner.output.metrics_interval_ms));
+            let mut ticker = interval(Duration::from_millis(metrics.inner.metrics_interval_ms));
             let mut system = System::new_with_specifics(
                 RefreshKind::new()
                     .with_cpu(CpuRefreshKind::everything())

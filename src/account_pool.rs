@@ -1,3 +1,4 @@
+use crate::storage::{AccountRecord, Storage, UserRecord};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -23,7 +24,13 @@ pub struct AccountPool {
 }
 
 impl AccountPool {
-    pub fn new(count: usize, initial_nonce: u64) -> Self {
+    pub async fn new(
+        count: usize,
+        initial_nonce: u64,
+        _initial_balance: u64,
+        storage: Option<Storage>,
+        user_account_pairs: usize,
+    ) -> Self {
         let mut accounts = Vec::with_capacity(count);
         for _ in 0..count {
             let mut private_key = [0u8; 32];
@@ -35,6 +42,42 @@ impl AccountPool {
                 nonce: AtomicU64::new(initial_nonce),
             });
             accounts.push(account);
+        }
+        if let Some(storage) = storage {
+            let pair_count = user_account_pairs.min(accounts.len());
+            for index in 0..pair_count {
+                let user_id = format!("user-{:04}", index + 1);
+                storage
+                    .enqueue_user(UserRecord {
+                        username: user_id.clone(),
+                        email: format!("{}@loadgen.local", user_id),
+                        password_hash: "loadgen".to_string(),
+                        role: "user".to_string(),
+                        status: "active".to_string(),
+                    })
+                    .await;
+            }
+            for (index, account) in accounts.iter().enumerate() {
+                let user_id = if index < pair_count {
+                    Some(format!("user-{:04}", index + 1))
+                } else {
+                    None
+                };
+                let account_id = format!("account-{:04}", index + 1);
+                let account_email = user_id
+                    .as_ref()
+                    .map(|id| format!("{}@loadgen.local", id))
+                    .unwrap_or_else(|| "unbound@loadgen.local".to_string());
+                storage
+                    .enqueue_account(AccountRecord {
+                        username: account_id,
+                        email: account_email,
+                        password_hash: derive_fingerprint(&account.private_key),
+                        role: "account".to_string(),
+                        status: "active".to_string(),
+                    })
+                    .await;
+            }
         }
         Self {
             accounts: Arc::new(accounts),
@@ -58,4 +101,11 @@ fn derive_address(private_key: &[u8; 32]) -> String {
     hasher.update(private_key);
     let hash = hasher.finalize();
     hex::encode(&hash[..20])
+}
+
+fn derive_fingerprint(private_key: &[u8; 32]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(private_key);
+    let hash = hasher.finalize();
+    hex::encode(hash)
 }

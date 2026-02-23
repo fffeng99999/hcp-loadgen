@@ -1,5 +1,5 @@
 use crate::account_pool::Account;
-use crate::config::TxType;
+use crate::config::{Compression, TxEncoding, TxType};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -36,14 +36,24 @@ pub struct TxBuilder {
     payload_size: usize,
     kinds: Vec<TxKind>,
     to_addresses: Vec<String>,
+    tx_encoding: TxEncoding,
+    compression: Compression,
 }
 
 impl TxBuilder {
-    pub fn new(payload_size: usize, kinds: Vec<TxKind>, to_addresses: Vec<String>) -> Self {
+    pub fn new(
+        payload_size: usize,
+        kinds: Vec<TxKind>,
+        to_addresses: Vec<String>,
+        tx_encoding: TxEncoding,
+        compression: Compression,
+    ) -> Self {
         Self {
             payload_size,
             kinds,
             to_addresses,
+            tx_encoding,
+            compression,
         }
     }
 
@@ -63,7 +73,14 @@ impl TxBuilder {
     }
 
     pub fn encode_tx(&self, tx: &Tx) -> Vec<u8> {
-        serde_json::to_vec(tx).unwrap_or_default()
+        let encoded = match self.tx_encoding {
+            TxEncoding::Proto => serde_json::to_vec(tx).unwrap_or_default(),
+            TxEncoding::Json => serde_json::to_vec(tx).unwrap_or_default(),
+        };
+        match self.compression {
+            Compression::None => encoded,
+            Compression::Gzip => compress_gzip(&encoded),
+        }
     }
 }
 
@@ -71,4 +88,14 @@ fn random_payload(size: usize) -> String {
     let mut bytes = vec![0u8; size];
     rand::thread_rng().fill(&mut bytes[..]);
     hex::encode(bytes)
+}
+
+fn compress_gzip(data: &[u8]) -> Vec<u8> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression as GzipCompression;
+    use std::io::Write;
+
+    let mut encoder = GzEncoder::new(Vec::new(), GzipCompression::default());
+    let _ = encoder.write_all(data);
+    encoder.finish().unwrap_or_default()
 }
