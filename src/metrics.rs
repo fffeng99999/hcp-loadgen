@@ -134,8 +134,9 @@ impl Metrics {
             .prom_latency
             .with_label_values(&["success"])
             .observe(latency_ms);
-        let mut hist = self.inner.latency_hist.blocking_lock();
-        let _ = hist.record(latency_us);
+        if let Ok(mut hist) = self.inner.latency_hist.try_lock() {
+            let _ = hist.record(latency_us);
+        }
     }
 
     pub fn record_reject(&self, latency_ms: f64) {
@@ -146,8 +147,9 @@ impl Metrics {
             .prom_latency
             .with_label_values(&["reject"])
             .observe(latency_ms);
-        let mut hist = self.inner.latency_hist.blocking_lock();
-        let _ = hist.record(latency_us);
+        if let Ok(mut hist) = self.inner.latency_hist.try_lock() {
+            let _ = hist.record(latency_us);
+        }
     }
 
     pub fn snapshot(&self) -> MetricsSnapshot {
@@ -176,10 +178,17 @@ impl Metrics {
         } else {
             0.0
         };
-        let hist = self.inner.latency_hist.blocking_lock();
-        let latency_p50_ms = hist.value_at_quantile(0.50) as f64 / 1000.0;
-        let latency_p90_ms = hist.value_at_quantile(0.90) as f64 / 1000.0;
-        let latency_p99_ms = hist.value_at_quantile(0.99) as f64 / 1000.0;
+        let (latency_p50_ms, latency_p90_ms, latency_p99_ms) = if let Ok(hist) =
+            self.inner.latency_hist.try_lock()
+        {
+            (
+                hist.value_at_quantile(0.50) as f64 / 1000.0,
+                hist.value_at_quantile(0.90) as f64 / 1000.0,
+                hist.value_at_quantile(0.99) as f64 / 1000.0,
+            )
+        } else {
+            (0.0, 0.0, 0.0)
+        };
         let cpu_percent = self.inner.cpu_percent.load(Ordering::Relaxed) as f64 / 100.0;
         let mem_bytes = self.inner.mem_bytes.load(Ordering::Relaxed);
         MetricsSnapshot {
