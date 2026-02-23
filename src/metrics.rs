@@ -4,6 +4,7 @@ use hdrhistogram::Histogram;
 use prometheus::{Encoder, HistogramOpts, HistogramVec, IntCounter, IntGauge, Registry, TextEncoder};
 use serde::Serialize;
 use std::fs::File;
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -244,6 +245,7 @@ impl Metrics {
                 let snapshot = json_metrics.snapshot();
                 if let Ok(line) = serde_json::to_string(&snapshot) {
                     println!("{}", line);
+                    let _ = io::stdout().flush();
                 }
                 if let Some(writer) = &json_metrics.inner.csv {
                     let mut writer = writer.lock().await;
