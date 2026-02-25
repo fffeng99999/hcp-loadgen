@@ -83,6 +83,7 @@ impl Scheduler {
                 _ = shutdown.changed() => break,
             }
         }
+        self.wait_for_inflight().await;
         Ok(())
     }
 
@@ -99,6 +100,7 @@ impl Scheduler {
             }
             sleep(Duration::from_millis(self.config.burst_interval_ms)).await;
         }
+        self.wait_for_inflight().await;
         Ok(())
     }
 
@@ -117,6 +119,7 @@ impl Scheduler {
             }
             tokio::task::yield_now().await;
         }
+        self.wait_for_inflight().await;
         Ok(())
     }
 
@@ -138,7 +141,18 @@ impl Scheduler {
             let jitter_ns = (base_interval_ns as f64 * jitter / 100.0) as u64;
             sleep(Duration::from_nanos(base_interval_ns + jitter_ns)).await;
         }
+        self.wait_for_inflight().await;
         Ok(())
+    }
+
+    async fn wait_for_inflight(&self) {
+        let permits = self.config.concurrency as u32;
+        if permits == 0 {
+            return;
+        }
+        if let Ok(permits) = self.semaphore.acquire_many(permits).await {
+            drop(permits);
+        }
     }
 
     async fn send_burst(&self, start: Instant, sent: &mut u64) {
