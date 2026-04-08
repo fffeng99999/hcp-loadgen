@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -92,6 +92,7 @@ pub struct Config {
     pub group_size: usize,
     pub subblock_parallelism: usize,
     pub storage_sharing_factor: usize,
+    pub worker_buffer_capacity: usize,
     pub database_url: String,
     pub storage_flush_interval_ms: u64,
     pub storage_channel_size: usize,
@@ -105,6 +106,21 @@ pub struct OutputConfig {
     pub json_interval_ms: u64,
     pub prometheus_addr: Option<String>,
     pub csv_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PerformanceSection {
+    worker_buffer_capacity: Option<usize>,
+    backpressure_threshold: Option<usize>,
+    storage_channel_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct FileConfig {
+    #[serde(flatten)]
+    config: Config,
+    performance: PerformanceSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,7 +325,7 @@ struct Cli {
     http2_enabled: Option<bool>,
     #[arg(long)]
     max_inflight_requests: Option<usize>,
-    #[arg(long)]
+    #[arg(long, visible_alias = "backpressure-limit")]
     backpressure_threshold: Option<usize>,
     #[arg(long)]
     rate_limit_strategy: Option<String>,
@@ -365,11 +381,13 @@ struct Cli {
     subblock_parallelism: Option<usize>,
     #[arg(long)]
     storage_sharing_factor: Option<usize>,
+    #[arg(long, visible_alias = "buffer-size")]
+    worker_buffer_capacity: Option<usize>,
     #[arg(long)]
     database_url: Option<String>,
     #[arg(long)]
     storage_flush_interval: Option<u64>,
-    #[arg(long)]
+    #[arg(long, visible_alias = "channel-capacity")]
     storage_channel_size: Option<usize>,
     #[arg(long)]
     storage_max_connections: Option<u32>,
@@ -469,6 +487,7 @@ impl Default for Config {
             group_size: 0,
             subblock_parallelism: 0,
             storage_sharing_factor: 0,
+            worker_buffer_capacity: 1000,
             database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcp_server?sslmode=disable&search_path=loadgendata,public".to_string(),
             storage_flush_interval_ms: 2000,
             storage_channel_size: 10000,
@@ -496,7 +515,17 @@ pub fn load_config() -> Result<Config> {
     let cli = Cli::parse();
     let mut config = if let Some(path) = cli.config {
         let contents = fs::read_to_string(path)?;
-        toml::from_str::<Config>(&contents)?
+        let mut file_config = toml::from_str::<FileConfig>(&contents)?;
+        if let Some(worker_buffer_capacity) = file_config.performance.worker_buffer_capacity {
+            file_config.config.worker_buffer_capacity = worker_buffer_capacity;
+        }
+        if let Some(backpressure_threshold) = file_config.performance.backpressure_threshold {
+            file_config.config.backpressure_threshold = backpressure_threshold;
+        }
+        if let Some(storage_channel_size) = file_config.performance.storage_channel_size {
+            file_config.config.storage_channel_size = storage_channel_size;
+        }
+        file_config.config
     } else {
         Config::default()
     };
@@ -759,6 +788,9 @@ pub fn load_config() -> Result<Config> {
     if let Some(storage_sharing_factor) = cli.storage_sharing_factor {
         config.storage_sharing_factor = storage_sharing_factor;
     }
+    if let Some(worker_buffer_capacity) = cli.worker_buffer_capacity {
+        config.worker_buffer_capacity = worker_buffer_capacity;
+    }
     if let Some(database_url) = cli.database_url {
         config.database_url = database_url;
     }
@@ -784,6 +816,25 @@ pub fn load_config() -> Result<Config> {
     if config.account_count == 0 && config.accounts_per_worker > 0 {
         let accounts_per_worker = config.accounts_per_worker;
         config.account_count = accounts_per_worker.saturating_mul(config.worker_threads);
+    }
+
+    if config.worker_buffer_capacity == 0 {
+        return Err(anyhow!("worker_buffer_capacity must be greater than 0"));
+    }
+    if config.storage_channel_size == 0 {
+        return Err(anyhow!("storage_channel_size must be greater than 0"));
+    }
+    let effective_backpressure = if config.backpressure_threshold == 0 {
+        5_000_000
+    } else {
+        config.backpressure_threshold
+    };
+    let min_backpressure =
+        config.worker_buffer_capacity.saturating_mul(config.worker_threads.max(1));
+    if effective_backpressure <= min_backpressure {
+        return Err(anyhow!(
+            "backpressure_threshold must be greater than worker_buffer_capacity * worker_threads"
+        ));
     }
 
     Ok(config)

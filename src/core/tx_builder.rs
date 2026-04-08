@@ -1,5 +1,5 @@
-use crate::account_pool::Account;
 use crate::config::{Compression, TxEncoding, TxType};
+use crate::types::InMemoryAccount;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +57,7 @@ impl TxBuilder {
         }
     }
 
-    pub fn build_tx(&self, from: &Account, nonce: u64) -> Tx {
+    pub fn build_tx(&self, from: &InMemoryAccount, nonce: u64) -> Tx {
         let mut rng = rand::thread_rng();
         let kind = self.kinds[rng.gen_range(0..self.kinds.len())].clone();
         let to = self.to_addresses[rng.gen_range(0..self.to_addresses.len())].clone();
