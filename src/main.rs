@@ -50,6 +50,8 @@ async fn main() -> Result<()> {
 
     let storage = Storage::new(StorageConfig {
         database_url: config.database_url.clone(),
+        db_schema: config.db_schema.clone(),
+        reset_schema_on_start: config.reset_schema_on_start,
         max_connections: config.storage_max_connections,
     })
     .await?;

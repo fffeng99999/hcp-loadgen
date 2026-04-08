@@ -94,6 +94,8 @@ pub struct Config {
     pub storage_sharing_factor: usize,
     pub worker_buffer_capacity: usize,
     pub database_url: String,
+    pub db_schema: String,
+    pub reset_schema_on_start: bool,
     pub storage_flush_interval_ms: u64,
     pub storage_channel_size: usize,
     pub storage_max_connections: u32,
@@ -385,6 +387,10 @@ struct Cli {
     worker_buffer_capacity: Option<usize>,
     #[arg(long)]
     database_url: Option<String>,
+    #[arg(long, visible_alias = "database-schema")]
+    db_schema: Option<String>,
+    #[arg(long)]
+    reset_schema_on_start: Option<bool>,
     #[arg(long)]
     storage_flush_interval: Option<u64>,
     #[arg(long, visible_alias = "channel-capacity")]
@@ -489,6 +495,8 @@ impl Default for Config {
             storage_sharing_factor: 0,
             worker_buffer_capacity: 1000,
             database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcp_server?sslmode=disable&search_path=loadgendata,public".to_string(),
+            db_schema: "loadgendata".to_string(),
+            reset_schema_on_start: false,
             storage_flush_interval_ms: 2000,
             storage_channel_size: 10000,
             storage_max_connections: 4,
@@ -794,6 +802,12 @@ pub fn load_config() -> Result<Config> {
     if let Some(database_url) = cli.database_url {
         config.database_url = database_url;
     }
+    if let Some(db_schema) = cli.db_schema {
+        config.db_schema = db_schema;
+    }
+    if let Some(reset_schema_on_start) = cli.reset_schema_on_start {
+        config.reset_schema_on_start = reset_schema_on_start;
+    }
     if let Some(storage_flush_interval) = cli.storage_flush_interval {
         config.storage_flush_interval_ms = storage_flush_interval;
     }
@@ -836,8 +850,22 @@ pub fn load_config() -> Result<Config> {
             "backpressure_threshold must be greater than worker_buffer_capacity * worker_threads"
         ));
     }
+    if !is_valid_identifier(&config.db_schema) {
+        return Err(anyhow!(
+            "db_schema must contain only letters, digits, and underscores, and cannot start with a digit"
+        ));
+    }
 
     Ok(config)
+}
+
+fn is_valid_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn parse_protocol(value: &str) -> Protocol {

@@ -16,23 +16,33 @@ use tokio_postgres::NoTls;
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
     pub database_url: String,
+    pub db_schema: String,
+    pub reset_schema_on_start: bool,
     pub max_connections: u32,
 }
 
 #[derive(Clone)]
 pub struct Storage {
     database_url: String,
+    db_schema: String,
     pool: PgPool,
 }
 
 impl Storage {
     pub async fn new(config: StorageConfig) -> Result<Self> {
         let database_url = config.database_url.clone();
+        let db_schema = config.db_schema.clone();
         let pool = PgPoolOptions::new()
             .max_connections(config.max_connections)
             .connect(&config.database_url)
             .await?;
-        Ok(Self { database_url, pool })
+        let storage = Self {
+            database_url,
+            db_schema,
+            pool,
+        };
+        storage.prepare_schema(config.reset_schema_on_start).await?;
+        Ok(storage)
     }
 
     pub async fn load_initial_state(
@@ -62,14 +72,16 @@ impl Storage {
         if !identities.is_empty() {
             let ids: Vec<i64> = identities.iter().map(|v| v.account_id as i64).collect();
             let addresses: Vec<String> = identities.iter().map(|v| v.address.clone()).collect();
-            sqlx::query(
+            let upsert_accounts_sql = format!(
                 r#"
-                INSERT INTO loadgendata.accounts (account_id, address, username)
+                INSERT INTO {}.accounts (account_id, address, username)
                 SELECT v.account_id, v.address, NULL::VARCHAR
                 FROM UNNEST($1::BIGINT[], $2::TEXT[]) AS v(account_id, address)
                 ON CONFLICT (account_id) DO UPDATE SET address = EXCLUDED.address;
                 "#,
-            )
+                self.db_schema
+            );
+            sqlx::query(&upsert_accounts_sql)
             .bind(ids)
             .bind(addresses)
             .execute(&mut *tx)
@@ -79,15 +91,17 @@ impl Storage {
             let account_ids: Vec<i64> = final_balances.iter().map(|v| v.account_id as i64).collect();
             let available: Vec<f64> = final_balances.iter().map(|v| v.available_balance).collect();
             let frozen: Vec<f64> = final_balances.iter().map(|v| v.frozen_balance).collect();
-            sqlx::query(
+            let upsert_balances_sql = format!(
                 r#"
-                INSERT INTO loadgendata.balances (account_id, asset_symbol, available, frozen, updated_at)
+                INSERT INTO {}.balances (account_id, asset_symbol, available, frozen, updated_at)
                 SELECT v.account_id, 'HCP', v.available::NUMERIC, v.frozen::NUMERIC, NOW()
                 FROM UNNEST($1::BIGINT[], $2::DOUBLE PRECISION[], $3::DOUBLE PRECISION[]) AS v(account_id, available, frozen)
                 ON CONFLICT (account_id, asset_symbol)
                 DO UPDATE SET available = EXCLUDED.available, frozen = EXCLUDED.frozen, updated_at = NOW();
                 "#,
-            )
+                self.db_schema
+            );
+            sqlx::query(&upsert_balances_sql)
             .bind(account_ids)
             .bind(available)
             .bind(frozen)
@@ -107,31 +121,36 @@ impl Storage {
     }
 
     async fn load_accounts_from_db(&self, initial_nonce: u64) -> Result<Vec<InMemoryAccount>> {
-        let rows = sqlx::query(
+        let load_accounts_sql = format!(
             r#"
             SELECT
                 a.account_id,
                 a.address,
+                a.username,
                 COALESCE(SUM(b.available), 0)::DOUBLE PRECISION AS available_balance,
                 COALESCE(SUM(b.frozen), 0)::DOUBLE PRECISION AS frozen_balance
-            FROM loadgendata.accounts a
-            LEFT JOIN loadgendata.balances b ON b.account_id = a.account_id
-            GROUP BY a.account_id, a.address
+            FROM {}.accounts a
+            LEFT JOIN {}.balances b ON b.account_id = a.account_id
+            GROUP BY a.account_id, a.address, a.username
             ORDER BY a.account_id;
             "#,
-        )
+            self.db_schema, self.db_schema
+        );
+        let rows = sqlx::query(&load_accounts_sql)
         .fetch_all(&self.pool)
         .await?;
         let mut accounts = Vec::with_capacity(rows.len());
         for row in rows {
             let account_id = row.try_get::<i64, _>("account_id")? as u64;
             let address = row.try_get::<String, _>("address")?;
+            let signer_name = row.try_get::<Option<String>, _>("username")?;
             let available_balance = row.try_get::<f64, _>("available_balance")?;
             let frozen_balance = row.try_get::<f64, _>("frozen_balance")?;
             let priv_key = derive_private_key_from_text(&address);
             accounts.push(InMemoryAccount::new(
                 account_id,
                 address,
+                signer_name,
                 priv_key,
                 initial_nonce,
                 available_balance,
@@ -162,6 +181,7 @@ impl Storage {
                     accounts.push(InMemoryAccount::new(
                         account_id,
                         record.address,
+                        record.name,
                         priv_key,
                         initial_nonce,
                         initial_balance as f64,
@@ -181,6 +201,7 @@ impl Storage {
             accounts.push(InMemoryAccount::new(
                 account_id,
                 address,
+                None,
                 private_key,
                 initial_nonce,
                 initial_balance as f64,
@@ -188,6 +209,85 @@ impl Storage {
             ));
         }
         Ok(accounts)
+    }
+
+    async fn prepare_schema(&self, reset_schema_on_start: bool) -> Result<()> {
+        let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS {};", self.db_schema);
+        sqlx::query(&create_schema_sql).execute(&self.pool).await?;
+        if reset_schema_on_start {
+            let drop_sql = format!("DROP SCHEMA IF EXISTS {} CASCADE;", self.db_schema);
+            sqlx::query(&drop_sql).execute(&self.pool).await?;
+            sqlx::query(&create_schema_sql).execute(&self.pool).await?;
+        }
+        let create_accounts_sql = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {}.accounts (
+                account_id BIGSERIAL PRIMARY KEY,
+                address VARCHAR(64) NOT NULL UNIQUE,
+                username VARCHAR(50),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            "#,
+            self.db_schema
+        );
+        let create_balances_sql = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {}.balances (
+                account_id BIGINT REFERENCES {}.accounts(account_id),
+                asset_symbol VARCHAR(10) NOT NULL,
+                available DECIMAL(20, 8) DEFAULT 0,
+                frozen DECIMAL(20, 8) DEFAULT 0,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, asset_symbol)
+            );
+            "#,
+            self.db_schema, self.db_schema
+        );
+        let create_orders_sql = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {}.orders (
+                order_id BIGSERIAL PRIMARY KEY,
+                account_id BIGINT REFERENCES {}.accounts(account_id),
+                side VARCHAR(10) CHECK (side IN ('BUY', 'SELL')),
+                price DECIMAL(20, 8) NOT NULL,
+                quantity DECIMAL(20, 8) NOT NULL,
+                filled_qty DECIMAL(20, 8) DEFAULT 0,
+                status VARCHAR(20) DEFAULT 'PENDING',
+                timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            "#,
+            self.db_schema, self.db_schema
+        );
+        let create_trades_sql = format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {}.trades (
+                trade_id BIGSERIAL PRIMARY KEY,
+                buy_order_id BIGINT,
+                sell_order_id BIGINT,
+                price DECIMAL(20, 8) NOT NULL,
+                quantity DECIMAL(20, 8) NOT NULL,
+                tx_hash VARCHAR(128),
+                latency_ms INTEGER,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            "#,
+            self.db_schema
+        );
+        let create_trade_index_sql = format!(
+            "CREATE INDEX IF NOT EXISTS idx_{}_trades_tx_hash ON {}.trades(tx_hash);",
+            self.db_schema, self.db_schema
+        );
+        let create_balance_index_sql = format!(
+            "CREATE INDEX IF NOT EXISTS idx_{}_balances_account_id ON {}.balances(account_id);",
+            self.db_schema, self.db_schema
+        );
+        sqlx::query(&create_accounts_sql).execute(&self.pool).await?;
+        sqlx::query(&create_balances_sql).execute(&self.pool).await?;
+        sqlx::query(&create_orders_sql).execute(&self.pool).await?;
+        sqlx::query(&create_trades_sql).execute(&self.pool).await?;
+        sqlx::query(&create_trade_index_sql).execute(&self.pool).await?;
+        sqlx::query(&create_balance_index_sql).execute(&self.pool).await?;
+        Ok(())
     }
 
     async fn copy_trades(&self, records: &[TransactionRecord]) -> Result<()> {
@@ -260,9 +360,9 @@ impl Storage {
                     .await?;
             }
             let _ = writer.as_mut().finish().await?;
-            tx.execute(
+            let insert_trades_sql = format!(
                 r#"
-                INSERT INTO loadgendata.trades (buy_order_id, sell_order_id, price, quantity, tx_hash, latency_ms, created_at)
+                INSERT INTO {}.trades (buy_order_id, sell_order_id, price, quantity, tx_hash, latency_ms, created_at)
                 SELECT
                     buy_order_id,
                     sell_order_id,
@@ -273,8 +373,9 @@ impl Storage {
                     to_timestamp(ts_ms::DOUBLE PRECISION / 1000.0)
                 FROM loadgen_trades_copy_buffer;
                 "#,
-                &[],
-            )
+                self.db_schema
+            );
+            tx.execute(&insert_trades_sql, &[])
             .await?;
             Ok(())
         }
@@ -294,6 +395,7 @@ impl Storage {
 
 #[derive(Debug, Deserialize)]
 struct AccountFileRecord {
+    name: Option<String>,
     address: String,
 }
 

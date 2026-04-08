@@ -5,8 +5,10 @@ use crate::core::signer::Signer;
 use crate::core::tx_builder::{TxBuilder, TxKind};
 use crate::metrics::Metrics;
 use crate::types::TransactionRecord;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use base64::Engine;
 use rand::Rng;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -22,6 +24,18 @@ enum WorkerMessage {
 struct WorkerRuntime {
     senders: Vec<mpsc::Sender<WorkerMessage>>,
     handles: Vec<JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+struct CliSigningContext {
+    cli_binary: String,
+    chain_id: String,
+    keyring_backend: String,
+    keyring_home: String,
+    rpc_endpoint: String,
+    denom: String,
+    fee_amount: u64,
+    gas_limit: u64,
 }
 
 #[derive(Clone)]
@@ -104,6 +118,21 @@ impl Scheduler {
             let persistence_sender = self.persistence_sender.clone();
             let backlog_records = self.backlog_records.clone();
             let amount = self.config.send_amount as f64;
+            let amount_u64 = self.config.send_amount;
+            let cli_signing = self
+                .config
+                .keyring_home
+                .as_ref()
+                .map(|home| CliSigningContext {
+                    cli_binary: self.config.cli_binary.clone(),
+                    chain_id: self.config.chain_id.clone(),
+                    keyring_backend: self.config.keyring_backend.clone(),
+                    keyring_home: home.clone(),
+                    rpc_endpoint: self.config.rpc_endpoint.clone(),
+                    denom: self.config.denom.clone(),
+                    fee_amount: self.config.fee_amount,
+                    gas_limit: self.config.gas_limit,
+                });
             let buffer_capacity = self.worker_buffer_capacity;
             let handle = tokio::spawn(async move {
                 let mut local_buffer: Vec<TransactionRecord> = Vec::with_capacity(buffer_capacity);
@@ -117,6 +146,8 @@ impl Scheduler {
                                 &broadcaster,
                                 &metrics,
                                 amount,
+                                amount_u64,
+                                cli_signing.as_ref(),
                                 &mut local_buffer,
                             )
                             .await;
@@ -286,6 +317,7 @@ impl Scheduler {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_send(
     pool: &AccountPool,
     builder: &TxBuilder,
@@ -293,6 +325,8 @@ async fn process_send(
     broadcaster: &Arc<dyn Broadcaster>,
     metrics: &Metrics,
     amount: f64,
+    amount_u64: u64,
+    cli_signing: Option<&CliSigningContext>,
     local_buffer: &mut Vec<TransactionRecord>,
 ) {
     let account = match pool.next_account() {
@@ -304,10 +338,28 @@ async fn process_send(
     };
     let nonce = account.next_nonce();
     let mut tx = builder.build_tx(&account, nonce);
-    let preimage = format!("{}:{}:{}", tx.from, tx.nonce, tx.payload_hex);
-    let signature = signer.sign(&account.priv_key, preimage.as_bytes());
-    tx.signature_hex = hex::encode(signature);
-    let payload = builder.encode_tx(&tx);
+    let payload = if let Some(signing) = cli_signing {
+        if let Some(from_name) = account.signer_name.as_ref() {
+            match build_cli_tx_bytes(signing, from_name, &tx.to, amount_u64).await {
+                Ok(payload) => payload,
+                Err(err) => {
+                    eprintln!("build cli tx failed: {}", err);
+                    metrics.record_reject(0.0);
+                    return;
+                }
+            }
+        } else {
+            let preimage = format!("{}:{}:{}", tx.from, tx.nonce, tx.payload_hex);
+            let signature = signer.sign(&account.priv_key, preimage.as_bytes());
+            tx.signature_hex = hex::encode(signature);
+            builder.encode_tx(&tx)
+        }
+    } else {
+        let preimage = format!("{}:{}:{}", tx.from, tx.nonce, tx.payload_hex);
+        let signature = signer.sign(&account.priv_key, preimage.as_bytes());
+        tx.signature_hex = hex::encode(signature);
+        builder.encode_tx(&tx)
+    };
     metrics.record_sent();
     let (success, latency_ms) = match broadcaster.send(payload).await {
         Ok(result) => {
@@ -364,4 +416,138 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+async fn build_cli_tx_bytes(
+    signing: &CliSigningContext,
+    from_name: &str,
+    to_address: &str,
+    amount: u64,
+) -> Result<Vec<u8>> {
+    let amount_arg = format!("{}{}", amount.max(1), signing.denom);
+    let fees_arg = format!("{}{}", signing.fee_amount.max(1), signing.denom);
+    let gas_limit = signing.gas_limit.to_string();
+    let from_name_owned = from_name.to_string();
+    let to_address_owned = to_address.to_string();
+    let cli_binary = signing.cli_binary.clone();
+    let chain_id = signing.chain_id.clone();
+    let keyring_backend = signing.keyring_backend.clone();
+    let keyring_home = signing.keyring_home.clone();
+    let rpc_endpoint = signing.rpc_endpoint.clone();
+
+    let unsigned = tokio::task::spawn_blocking({
+        let cli_binary = cli_binary.clone();
+        let chain_id = chain_id.clone();
+        let keyring_backend = keyring_backend.clone();
+        let keyring_home = keyring_home.clone();
+        let rpc_endpoint = rpc_endpoint.clone();
+        let from_name = from_name_owned.clone();
+        let to_address = to_address_owned.clone();
+        let amount_arg = amount_arg.clone();
+        let fees_arg = fees_arg.clone();
+        let gas_limit = gas_limit.clone();
+        move || {
+            run_cli(
+                &cli_binary,
+                &[
+                    "tx",
+                    "bank",
+                    "send",
+                    &from_name,
+                    &to_address,
+                    &amount_arg,
+                    "--generate-only",
+                    "--output",
+                    "json",
+                    "--chain-id",
+                    &chain_id,
+                    "--keyring-backend",
+                    &keyring_backend,
+                    "--home",
+                    &keyring_home,
+                    "--node",
+                    &rpc_endpoint,
+                    "--gas",
+                    &gas_limit,
+                    "--fees",
+                    &fees_arg,
+                ],
+                None,
+            )
+        }
+    })
+    .await
+    .map_err(|err| anyhow!("spawn build unsigned tx failed: {}", err))??;
+
+    let signed = tokio::task::spawn_blocking({
+        let cli_binary = cli_binary.clone();
+        let chain_id = chain_id.clone();
+        let keyring_backend = keyring_backend.clone();
+        let keyring_home = keyring_home.clone();
+        let rpc_endpoint = rpc_endpoint.clone();
+        let from_name = from_name_owned.clone();
+        move || {
+            run_cli(
+                &cli_binary,
+                &[
+                    "tx",
+                    "sign",
+                    "-",
+                    "--from",
+                    &from_name,
+                    "--chain-id",
+                    &chain_id,
+                    "--keyring-backend",
+                    &keyring_backend,
+                    "--home",
+                    &keyring_home,
+                    "--node",
+                    &rpc_endpoint,
+                    "--output",
+                    "json",
+                ],
+                Some(&unsigned),
+            )
+        }
+    })
+    .await
+    .map_err(|err| anyhow!("spawn sign tx failed: {}", err))??;
+
+    let encoded = tokio::task::spawn_blocking({
+        let cli_binary = cli_binary.clone();
+        move || run_cli(&cli_binary, &["tx", "encode", "-"], Some(&signed))
+    })
+    .await
+    .map_err(|err| anyhow!("spawn encode tx failed: {}", err))??;
+
+    let payload = encoded.trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|err| anyhow!("decode tx payload failed: {}", err))?;
+    Ok(bytes)
+}
+
+fn run_cli(binary: &str, args: &[&str], input: Option<&str>) -> Result<String> {
+    let mut command = Command::new(binary);
+    command.args(args);
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    if let Some(input) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(input.as_bytes())?;
+        }
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "cli failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }

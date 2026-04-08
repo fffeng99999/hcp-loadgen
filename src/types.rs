@@ -5,6 +5,7 @@ use std::sync::RwLock;
 pub struct InMemoryAccount {
     pub account_id: u64,
     pub address: String,
+    pub signer_name: Option<String>,
     pub priv_key: [u8; 32],
     pub nonce: AtomicU64,
     available_balance: RwLock<f64>,
@@ -15,6 +16,7 @@ impl InMemoryAccount {
     pub fn new(
         account_id: u64,
         address: String,
+        signer_name: Option<String>,
         priv_key: [u8; 32],
         nonce: u64,
         available_balance: f64,
@@ -23,6 +25,7 @@ impl InMemoryAccount {
         Self {
             account_id,
             address,
+            signer_name,
             priv_key,
             nonce: AtomicU64::new(nonce),
             available_balance: RwLock::new(available_balance),
