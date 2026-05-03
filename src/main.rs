@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         max_connections: config.storage_max_connections,
     })
     .await?;
-    let pool: AccountPool = storage
+    let mut pool: AccountPool = storage
         .load_initial_state(
         config.account_count,
         config.initial_nonce,
@@ -66,6 +66,19 @@ async fn main() -> Result<()> {
             .map(PathBuf::from),
         )
         .await?;
+    match config.account_selection_mode {
+        config::AccountSelectionMode::Zipf => {
+            pool.set_zipf_mode(config.zipf_alpha);
+            println!("Account selection: Zipf (alpha={})", config.zipf_alpha);
+        }
+        config::AccountSelectionMode::Random => {
+            pool.set_random_mode(true);
+            println!("Account selection: Random");
+        }
+        _ => {
+            println!("Account selection: RoundRobin");
+        }
+    }
     let broadcaster: Arc<dyn Broadcaster> = match config.protocol {
         Protocol::Http => Arc::new(HttpBroadcaster::new(
             config.http_endpoint.clone(),

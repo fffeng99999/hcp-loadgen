@@ -92,6 +92,8 @@ pub struct Config {
     pub group_size: usize,
     pub subblock_parallelism: usize,
     pub storage_sharing_factor: usize,
+    pub account_selection_mode: AccountSelectionMode,
+    pub zipf_alpha: f64,
     pub worker_buffer_capacity: usize,
     pub database_url: String,
     pub db_schema: String,
@@ -198,6 +200,14 @@ pub enum BroadcastMode {
 pub enum RateLimitStrategy {
     TokenBucket,
     LeakyBucket,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountSelectionMode {
+    RoundRobin,
+    Random,
+    Zipf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -383,6 +393,10 @@ struct Cli {
     subblock_parallelism: Option<usize>,
     #[arg(long)]
     storage_sharing_factor: Option<usize>,
+    #[arg(long)]
+    account_selection_mode: Option<String>,
+    #[arg(long)]
+    zipf_alpha: Option<f64>,
     #[arg(long, visible_alias = "buffer-size")]
     worker_buffer_capacity: Option<usize>,
     #[arg(long)]
@@ -493,6 +507,8 @@ impl Default for Config {
             group_size: 0,
             subblock_parallelism: 0,
             storage_sharing_factor: 0,
+            account_selection_mode: AccountSelectionMode::RoundRobin,
+            zipf_alpha: 0.0,
             worker_buffer_capacity: 1000,
             database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcp_server?sslmode=disable&search_path=loadgendata,public".to_string(),
             db_schema: "loadgendata".to_string(),
@@ -796,6 +812,12 @@ pub fn load_config() -> Result<Config> {
     if let Some(storage_sharing_factor) = cli.storage_sharing_factor {
         config.storage_sharing_factor = storage_sharing_factor;
     }
+    if let Some(account_selection_mode) = cli.account_selection_mode {
+        config.account_selection_mode = parse_account_selection_mode(&account_selection_mode);
+    }
+    if let Some(zipf_alpha) = cli.zipf_alpha {
+        config.zipf_alpha = zipf_alpha;
+    }
     if let Some(worker_buffer_capacity) = cli.worker_buffer_capacity {
         config.worker_buffer_capacity = worker_buffer_capacity;
     }
@@ -940,6 +962,14 @@ fn parse_rate_limit_strategy(value: &str) -> RateLimitStrategy {
     match value.to_ascii_lowercase().as_str() {
         "leaky_bucket" => RateLimitStrategy::LeakyBucket,
         _ => RateLimitStrategy::TokenBucket,
+    }
+}
+
+fn parse_account_selection_mode(value: &str) -> AccountSelectionMode {
+    match value.to_ascii_lowercase().as_str() {
+        "zipf" => AccountSelectionMode::Zipf,
+        "random" => AccountSelectionMode::Random,
+        _ => AccountSelectionMode::RoundRobin,
     }
 }
 
