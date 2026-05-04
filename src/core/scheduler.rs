@@ -340,7 +340,7 @@ async fn process_send(
     let mut tx = builder.build_tx(&account, nonce);
     let payload = if let Some(signing) = cli_signing {
         if let Some(from_name) = account.signer_name.as_ref() {
-            match build_cli_tx_bytes(signing, from_name, &tx.to, amount_u64).await {
+            match build_cli_tx_bytes(signing, from_name, &tx.from, &tx.to, amount_u64, nonce).await {
                 Ok(payload) => payload,
                 Err(err) => {
                     eprintln!("build cli tx failed: {}", err);
@@ -418,22 +418,43 @@ fn now_ms() -> u128 {
         .as_millis()
 }
 
+fn resolve_account_info(genesis_path: &std::path::Path, address: &str) -> Option<(u64, u64)> {
+    let content = std::fs::read_to_string(genesis_path).ok()?;
+    let genesis: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let accounts = genesis.get("app_state")?.get("auth")?.get("accounts")?.as_array()?;
+    for acc in accounts {
+        let acc_addr = acc.get("address")?.as_str()?;
+        if acc_addr == address {
+            let account_number = acc.get("account_number")?.as_str()?.parse::<u64>().ok()?;
+            let sequence = acc.get("sequence")?.as_str()?.parse::<u64>().ok()?;
+            return Some((account_number, sequence));
+        }
+    }
+    None
+}
+
 async fn build_cli_tx_bytes(
     signing: &CliSigningContext,
     from_name: &str,
+    from_address: &str,
     to_address: &str,
     amount: u64,
+    sequence: u64,
 ) -> Result<Vec<u8>> {
     let amount_arg = format!("{}{}", amount.max(1), signing.denom);
     let fees_arg = format!("{}{}", signing.fee_amount.max(1), signing.denom);
     let gas_limit = signing.gas_limit.to_string();
     let from_name_owned = from_name.to_string();
+    let from_address_owned = from_address.to_string();
     let to_address_owned = to_address.to_string();
     let cli_binary = signing.cli_binary.clone();
     let chain_id = signing.chain_id.clone();
     let keyring_backend = signing.keyring_backend.clone();
     let keyring_home = signing.keyring_home.clone();
     let rpc_endpoint = signing.rpc_endpoint.clone();
+
+    let genesis_path = std::path::Path::new(&keyring_home).join("config").join("genesis.json");
+    let (account_number, _) = resolve_account_info(&genesis_path, from_address).unwrap_or((0, 0));
 
     let unsigned = tokio::task::spawn_blocking({
         let cli_binary = cli_binary.clone();
@@ -486,6 +507,8 @@ async fn build_cli_tx_bytes(
         let keyring_home = keyring_home.clone();
         let rpc_endpoint = rpc_endpoint.clone();
         let from_name = from_name_owned.clone();
+        let account_number = account_number;
+        let sequence = sequence;
         move || {
             run_cli(
                 &cli_binary,
@@ -505,6 +528,11 @@ async fn build_cli_tx_bytes(
                     &rpc_endpoint,
                     "--output",
                     "json",
+                    "--offline",
+                    "--account-number",
+                    &account_number.to_string(),
+                    "--sequence",
+                    &sequence.to_string(),
                 ],
                 Some(&unsigned),
             )

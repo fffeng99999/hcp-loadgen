@@ -131,6 +131,7 @@ impl Storage {
                 COALESCE(SUM(b.frozen), 0)::DOUBLE PRECISION AS frozen_balance
             FROM {}.accounts a
             LEFT JOIN {}.balances b ON b.account_id = a.account_id
+            WHERE a.username IS NOT NULL
             GROUP BY a.account_id, a.address, a.username
             ORDER BY a.account_id;
             "#,
@@ -175,21 +176,26 @@ impl Storage {
                 if line.is_empty() {
                     continue;
                 }
-                if let Ok(record) = serde_json::from_str::<AccountFileRecord>(line) {
-                    let account_id = (index + 1) as u64;
-                    let priv_key = derive_private_key_from_text(&record.address);
-                    accounts.push(InMemoryAccount::new(
-                        account_id,
-                        record.address,
-                        record.name,
-                        priv_key,
-                        initial_nonce,
-                        initial_balance as f64,
-                        0.0,
-                    ));
-                    if accounts.len() >= account_count {
-                        return Ok(accounts);
+                match serde_json::from_str::<AccountFileRecord>(line) {
+                    Ok(record) => {
+                        let account_id = (index + 1) as u64;
+                        let priv_key = derive_private_key_from_text(&record.address);
+                        accounts.push(InMemoryAccount::new(
+                            account_id,
+                            record.address,
+                            record.name,
+                            priv_key,
+                            initial_nonce,
+                            initial_balance as f64,
+                            0.0,
+                        ));
                     }
+                    Err(err) => {
+                        eprintln!("failed to parse account line: {} err={}", line, err);
+                    }
+                }
+                if accounts.len() >= account_count {
+                    return Ok(accounts);
                 }
             }
         }
