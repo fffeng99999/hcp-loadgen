@@ -75,6 +75,9 @@ impl Scheduler {
             pool.addresses(),
             config.tx_encoding.clone(),
             config.compression.clone(),
+            config.denom.clone(),
+            config.send_amount,
+            config.gas_limit,
         );
         Self {
             config,

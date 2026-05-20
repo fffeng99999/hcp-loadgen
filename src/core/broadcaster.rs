@@ -1,7 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use crate::config::BroadcastMode as ConfigBroadcastMode;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_client::ServiceClient;
-use cosmos_sdk_proto::cosmos::tx::v1beta1::{BroadcastMode, BroadcastTxRequest};
+use cosmos_sdk_proto::cosmos::tx::v1beta1::{BroadcastMode as ProtoBroadcastMode, BroadcastTxRequest};
 use reqwest::Client;
 use std::sync::Arc;
 use std::time::Instant;
@@ -49,16 +50,21 @@ impl Broadcaster for HttpBroadcaster {
 #[derive(Clone)]
 pub struct GrpcBroadcaster {
     client: Arc<Mutex<ServiceClient<Channel>>>,
-    mode: BroadcastMode,
+    mode: ProtoBroadcastMode,
 }
 
 impl GrpcBroadcaster {
-    pub async fn new(endpoint: String) -> Result<Self> {
+    pub async fn new(endpoint: String, mode: ConfigBroadcastMode) -> Result<Self> {
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         let client = ServiceClient::new(channel);
+        let mode = match mode {
+            ConfigBroadcastMode::Async => ProtoBroadcastMode::Async,
+            ConfigBroadcastMode::Sync => ProtoBroadcastMode::Sync,
+            ConfigBroadcastMode::Block => ProtoBroadcastMode::Block,
+        };
         Ok(Self {
             client: Arc::new(Mutex::new(client)),
-            mode: BroadcastMode::Sync,
+            mode,
         })
     }
 }

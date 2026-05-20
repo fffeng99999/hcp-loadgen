@@ -1,5 +1,10 @@
 use crate::config::{Compression, TxEncoding, TxType};
 use crate::types::InMemoryAccount;
+use cosmos_sdk_proto::cosmos::bank::v1beta1::MsgSend;
+use cosmos_sdk_proto::cosmos::base::v1beta1::Coin;
+use cosmos_sdk_proto::cosmos::tx::v1beta1::{AuthInfo, Fee, TxBody, TxRaw};
+use cosmos_sdk_proto::Any;
+use prost::Message;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +43,9 @@ pub struct TxBuilder {
     to_addresses: Vec<String>,
     tx_encoding: TxEncoding,
     compression: Compression,
+    denom: String,
+    send_amount: u64,
+    gas_limit: u64,
 }
 
 impl TxBuilder {
@@ -47,6 +55,9 @@ impl TxBuilder {
         to_addresses: Vec<String>,
         tx_encoding: TxEncoding,
         compression: Compression,
+        denom: String,
+        send_amount: u64,
+        gas_limit: u64,
     ) -> Self {
         Self {
             payload_size,
@@ -54,6 +65,9 @@ impl TxBuilder {
             to_addresses,
             tx_encoding,
             compression,
+            denom,
+            send_amount,
+            gas_limit,
         }
     }
 
@@ -74,13 +88,50 @@ impl TxBuilder {
 
     pub fn encode_tx(&self, tx: &Tx) -> Vec<u8> {
         let encoded = match self.tx_encoding {
-            TxEncoding::Proto => serde_json::to_vec(tx).unwrap_or_default(),
+            TxEncoding::Proto => self.encode_sdk_tx_raw(tx),
             TxEncoding::Json => serde_json::to_vec(tx).unwrap_or_default(),
         };
         match self.compression {
             Compression::None => encoded,
             Compression::Gzip => compress_gzip(&encoded),
         }
+    }
+
+    fn encode_sdk_tx_raw(&self, tx: &Tx) -> Vec<u8> {
+        let msg = MsgSend {
+            from_address: tx.from.clone(),
+            to_address: tx.to.clone(),
+            amount: vec![Coin {
+                denom: self.denom.clone(),
+                amount: self.send_amount.max(1).to_string(),
+            }],
+        };
+        let body = TxBody {
+            messages: vec![Any {
+                type_url: "/cosmos.bank.v1beta1.MsgSend".to_string(),
+                value: msg.encode_to_vec(),
+            }],
+            memo: format!("nonce={};payload={}", tx.nonce, tx.payload_hex),
+            timeout_height: 0,
+            extension_options: Vec::new(),
+            non_critical_extension_options: Vec::new(),
+        };
+        let auth_info = AuthInfo {
+            signer_infos: Vec::new(),
+            fee: Some(Fee {
+                amount: Vec::new(),
+                gas_limit: self.gas_limit,
+                payer: String::new(),
+                granter: String::new(),
+            }),
+            tip: None,
+        };
+        let raw = TxRaw {
+            body_bytes: body.encode_to_vec(),
+            auth_info_bytes: auth_info.encode_to_vec(),
+            signatures: Vec::new(),
+        };
+        raw.encode_to_vec()
     }
 }
 

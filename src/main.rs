@@ -81,7 +81,9 @@ async fn main() -> Result<()> {
             config.http_endpoint.clone(),
             config.concurrency,
         )?),
-        Protocol::Grpc => Arc::new(GrpcBroadcaster::new(config.grpc_endpoint.clone()).await?),
+        Protocol::Grpc => Arc::new(
+            GrpcBroadcaster::new(config.grpc_endpoint.clone(), config.broadcast_mode.clone()).await?,
+        ),
     };
     let backlog_records = Arc::new(AtomicU64::new(0));
     let (persist_tx, mut persist_rx) =

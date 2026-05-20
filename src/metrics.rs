@@ -50,6 +50,7 @@ pub struct MetricsSnapshot {
     pub latency_avg_ms: f64,
     pub latency_p50_ms: f64,
     pub latency_p90_ms: f64,
+    pub latency_p95_ms: f64,
     pub latency_p99_ms: f64,
     pub cpu_percent: f64,
     pub mem_bytes: u64,
@@ -88,6 +89,7 @@ impl Metrics {
                 "latency_avg_ms",
                 "latency_p50_ms",
                 "latency_p90_ms",
+                "latency_p95_ms",
                 "latency_p99_ms",
                 "cpu_percent",
                 "mem_bytes",
@@ -179,16 +181,17 @@ impl Metrics {
         } else {
             0.0
         };
-        let (latency_p50_ms, latency_p90_ms, latency_p99_ms) = if let Ok(hist) =
+        let (latency_p50_ms, latency_p90_ms, latency_p95_ms, latency_p99_ms) = if let Ok(hist) =
             self.inner.latency_hist.try_lock()
         {
             (
                 hist.value_at_quantile(0.50) as f64 / 1000.0,
                 hist.value_at_quantile(0.90) as f64 / 1000.0,
+                hist.value_at_quantile(0.95) as f64 / 1000.0,
                 hist.value_at_quantile(0.99) as f64 / 1000.0,
             )
         } else {
-            (0.0, 0.0, 0.0)
+            (0.0, 0.0, 0.0, 0.0)
         };
         let cpu_percent = self.inner.cpu_percent.load(Ordering::Relaxed) as f64 / 100.0;
         let mem_bytes = self.inner.mem_bytes.load(Ordering::Relaxed);
@@ -203,6 +206,7 @@ impl Metrics {
             latency_avg_ms,
             latency_p50_ms,
             latency_p90_ms,
+            latency_p95_ms,
             latency_p99_ms,
             cpu_percent,
             mem_bytes,
