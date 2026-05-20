@@ -12,13 +12,13 @@ use core::broadcaster::{Broadcaster, GrpcBroadcaster, HttpBroadcaster};
 use core::scheduler::Scheduler;
 use metrics::Metrics;
 use persistence::storage::{Storage, StorageConfig};
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-use types::TransactionRecord;
 use serde_json::json;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
+use types::TransactionRecord;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -57,13 +57,10 @@ async fn main() -> Result<()> {
     .await?;
     let mut pool: AccountPool = storage
         .load_initial_state(
-        config.account_count,
-        config.initial_nonce,
-        config.initial_balance,
-        config
-            .account_file
-            .as_ref()
-            .map(PathBuf::from),
+            config.account_count,
+            config.initial_nonce,
+            config.initial_balance,
+            config.account_file.as_ref().map(PathBuf::from),
         )
         .await?;
     match config.account_selection_mode {
@@ -105,7 +102,7 @@ async fn main() -> Result<()> {
         config,
         pool.clone(),
         broadcaster,
-        metrics,
+        metrics.clone(),
         persist_tx,
         backlog_records,
     );
@@ -118,6 +115,9 @@ async fn main() -> Result<()> {
         _ = tokio::signal::ctrl_c() => {
             let _ = shutdown_tx.send(true);
         }
+    }
+    if let Ok(line) = serde_json::to_string(&metrics.snapshot()) {
+        println!("{}", line);
     }
     drop(scheduler);
     let _ = persist_task.await;
