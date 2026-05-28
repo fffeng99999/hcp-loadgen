@@ -4,114 +4,216 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// 负载生成器全局配置结构体，聚合了协议、账户、交易、网络、存储等所有可调参数。
+/// 支持从配置文件、命令行参数和环境变量加载并合并。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// 与节点通信的协议类型：Http 或 Grpc
     pub protocol: Protocol,
+    /// HTTP 交易广播端点地址
     pub http_endpoint: String,
+    /// gRPC 交易广播端点地址
     pub grpc_endpoint: String,
+    /// Tendermint RPC 端点地址（用于查询账户状态等）
     pub rpc_endpoint: String,
+    /// 目标链的 chain_id
     pub chain_id: String,
+    /// 密钥环后端类型，如 "test" 或 "file"
     pub keyring_backend: String,
+    /// 密钥环主目录路径（可选）
     pub keyring_home: Option<String>,
+    /// 预生成账户数据文件路径（可选）
     pub account_file: Option<String>,
+    /// 链客户端二进制名称或路径，默认从环境变量 HCPD_BINARY 读取，否则为 "hcpd"
     pub cli_binary: String,
+    /// 交易发送模式：Fixed（固定间隔）、Burst（突发）、Sustained（持续）、Jitter（抖动）
     pub mode: SendMode,
+    /// 目标每秒交易数（TPS）
     pub target_tps: u64,
+    /// 压测持续时间（秒），0 表示不限制
     pub duration: u64,
+    /// 总交易发送数量上限，0 表示不限制
     pub total_txs: u64,
+    /// 并发连接数或并发任务数
     pub concurrency: usize,
+    /// 工作线程数，用于分片处理交易
     pub worker_threads: usize,
+    /// 异步运行时线程数（Tokio worker threads）
     pub async_runtime_threads: usize,
+    /// 每批处理的交易数量
     pub batch_size: usize,
+    /// 突发模式下每次突发发送的交易数量
     pub burst_size: usize,
+    /// 突发模式下每次突发之间的间隔（毫秒）
     pub burst_interval_ms: u64,
+    /// 预热阶段持续时间（秒），此阶段数据不计入统计
     pub warmup_duration: u64,
+    /// 冷却阶段持续时间（秒），此阶段数据不计入统计
     pub cooldown_duration: u64,
+    /// 预生成账户总数
     pub account_count: usize,
+    /// 每个工作线程分配的账户数，0 表示由程序自动计算
     pub accounts_per_worker: usize,
+    /// 每个账户的初始余额
     pub initial_balance: u64,
+    /// 每个账户的初始 nonce 值
     pub initial_nonce: u64,
+    /// Nonce 管理策略：Local（本地递增）、Query（查询链上）、Optimistic（乐观）
     pub nonce_strategy: NonceStrategy,
+    /// 是否启用账户轮换，避免同一账户被过度使用
     pub account_rotation: bool,
+    /// 每个账户最大允许的在途（inflight）交易数
     pub max_inflight_per_account: usize,
+    /// 是否启用多签交易
     pub multisig: bool,
+    /// 每笔交易需要的签名者数量
     pub signers_per_tx: usize,
+    /// 交易类型：Transfer（转账）、Stake（质押）、ContractCall（合约调用）
     pub tx_type: TxType,
+    /// 交易附加负载的大小（字节），用于模拟大数据交易
     pub payload_size: usize,
+    /// 每笔交易中包含的消息数量
     pub message_count_per_tx: usize,
+    /// 单笔交易的 gas 上限
     pub gas_limit: u64,
+    /// 交易手续费金额
     pub fee_amount: u64,
+    /// 转账金额
     pub send_amount: u64,
+    /// 代币最小单位名称，如 "uhcp"
     pub denom: String,
+    /// 交易备注（memo）的大小（字节）
     pub memo_size: usize,
+    /// 交易超时块高，0 表示不设置
     pub timeout_height: u64,
+    /// 交易扩展选项列表
     pub extension_options: Vec<String>,
+    /// 交易编码格式：Proto 或 Json
     pub tx_encoding: TxEncoding,
+    /// 交易压缩方式：None 或 Gzip
     pub compression: Compression,
+    /// 签名算法：Ed25519 或 Secp256k1
     pub sign_algo: SignAlgo,
+    /// 签名模式：Direct 或 Legacy
     pub sign_mode: SignMode,
+    /// 是否启用签名缓存，避免重复签名计算
     pub signature_cache: bool,
+    /// 是否启用并行签名
     pub parallel_signing: bool,
+    /// 签名专用线程数
     pub signer_threads: usize,
+    /// RPC 端点列表，用于负载均衡或故障转移
     pub rpc_endpoint_list: Vec<String>,
+    /// HTTP/gRPC 连接池大小
     pub connection_pool_size: usize,
+    /// 连接池中最大空闲连接数
     pub max_idle_connections: usize,
+    /// 单次请求超时时间（毫秒）
     pub request_timeout_ms: u64,
+    /// 请求失败后的重试次数
     pub retry_count: usize,
+    /// 重试间隔退避时间（毫秒）
     pub retry_backoff_ms: u64,
+    /// 交易广播模式：Async（异步）、Sync（同步等待检查）、Block（同步等待出块）
     pub broadcast_mode: BroadcastMode,
+    /// gRPC  keepalive 间隔（毫秒），0 表示禁用
     pub grpc_keepalive_ms: u64,
+    /// 是否启用 HTTP/2
     pub http2_enabled: bool,
+    /// 最大在途请求数，0 表示不限制
     pub max_inflight_requests: usize,
+    /// 背压阈值，当在途交易超过此值时触发流量控制，0 表示使用默认值 5_000_000
     pub backpressure_threshold: usize,
+    /// 限流策略：TokenBucket（令牌桶）或 LeakyBucket（漏桶）
     pub rate_limit_strategy: RateLimitStrategy,
+    /// 抖动模式下的抖动范围百分比
     pub jitter_range: f64,
+    /// 固定发送模式下的发送间隔（纳秒）
     pub send_interval_ns: u64,
+    /// 是否启用自适应 TPS，根据系统负载动态调整发送速率
     pub adaptive_tps: bool,
+    /// 错误阈值，当连续错误数超过此值时停止压测，0 表示不限制
     pub error_threshold_stop: u64,
+    /// 当队列溢出时是否丢弃新交易，true 表示丢弃，false 表示阻塞等待
     pub drop_on_overflow: bool,
+    /// 指标采集和输出间隔（毫秒）
     pub metrics_interval_ms: u64,
+    /// 延迟直方图的分桶边界（毫秒）
     pub latency_histogram_buckets: Vec<u64>,
+    /// 指标导出格式：Json、Csv 或 Prometheus
     pub export_format: ExportFormat,
+    /// 日志级别，如 "info"、"debug"、"warn"、"error"
     pub log_level: String,
+    /// 是否记录原始延迟数据
     pub record_raw_latency: bool,
+    /// 是否记录错误详情
     pub record_error_details: bool,
+    /// CPU 亲和性设置（可选），格式如 "0-3,5"
     pub cpu_affinity: Option<String>,
+    /// 指定的 NUMA 节点（可选）
     pub numa_node: Option<usize>,
+    /// 内存限制（字节，可选）
     pub memory_limit: Option<u64>,
+    /// 套接字缓冲区大小（可选）
     pub socket_buffer_size: Option<u64>,
+    /// 是否启用 TCP_NODELAY，禁用 Nagle 算法以降低延迟
     pub tcp_nodelay: bool,
+    /// 是否启用 SO_REUSEPORT，允许多个套接字绑定同一端口
     pub reuse_port: bool,
+    /// 故障注入率（0.0 ~ 1.0），用于模拟异常交易
     pub fault_injection_rate: f64,
+    /// 无效签名注入率（0.0 ~ 1.0），用于测试签名验证
     pub invalid_signature_rate: f64,
+    /// Nonce 冲突注入率（0.0 ~ 1.0），用于测试重放保护
     pub nonce_conflict_rate: f64,
+    /// 模拟网络延迟（毫秒）
     pub network_delay_simulation_ms: u64,
+    /// 模拟丢包率（0.0 ~ 1.0）
     pub packet_loss_rate: f64,
+    /// 共识节点数量，用于实验场景配置
     pub node_count: usize,
+    /// 分组大小，用于分层共识等实验
     pub group_size: usize,
+    /// 子块并行度，用于并行执行实验
     pub subblock_parallelism: usize,
+    /// 存储共享因子，用于存储分片实验
     pub storage_sharing_factor: usize,
+    /// 账户选择模式：RoundRobin（轮询）、Random（随机）、Zipf（齐普夫分布）
     pub account_selection_mode: AccountSelectionMode,
+    /// Zipf 分布的 alpha 参数，越大越集中
     pub zipf_alpha: f64,
+    /// 每个工作线程内部的交易缓冲区容量
     pub worker_buffer_capacity: usize,
+    /// PostgreSQL 数据库连接 URL
     pub database_url: String,
+    /// 数据库 schema 名称
     pub db_schema: String,
+    /// 启动时是否重置（清空）数据库 schema
     pub reset_schema_on_start: bool,
+    /// 存储刷新间隔（毫秒），控制数据批量写入数据库的频率
     pub storage_flush_interval_ms: u64,
+    /// 存储通道大小，用于解耦交易发送和持久化
     pub storage_channel_size: usize,
+    /// 存储模块的数据库最大连接数
     pub storage_max_connections: u32,
+    /// 输出配置子结构，包含 JSON 间隔、Prometheus 地址、CSV 路径等
     pub output: OutputConfig,
 }
 
+/// 输出配置子结构，控制指标和结果的输出方式。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OutputConfig {
+    /// JSON 指标输出间隔（毫秒）
     pub json_interval_ms: u64,
+    /// Prometheus 暴露地址（可选），如 "0.0.0.0:9100"
     pub prometheus_addr: Option<String>,
+    /// CSV 结果输出文件路径（可选）
     pub csv_path: Option<String>,
 }
 
+/// 配置文件中的 performance 段落，用于覆盖部分性能相关参数。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PerformanceSection {
     worker_buffer_capacity: Option<usize>,
@@ -119,6 +221,7 @@ struct PerformanceSection {
     storage_channel_size: Option<usize>,
 }
 
+/// 配置文件顶层结构，包含主配置和 performance 段落。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct FileConfig {
@@ -127,6 +230,7 @@ struct FileConfig {
     performance: PerformanceSection,
 }
 
+/// 通信协议枚举，支持 HTTP 和 gRPC 两种广播方式。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
@@ -134,90 +238,132 @@ pub enum Protocol {
     Grpc,
 }
 
+/// 交易发送模式枚举，决定交易流量的时间分布特征。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SendMode {
+    /// 固定间隔发送
     Fixed,
+    /// 周期性突发发送
     Burst,
+    /// 持续饱和发送
     Sustained,
+    /// 带随机抖动的发送
     Jitter,
 }
 
+/// 交易类型枚举，用于构造不同种类的交易负载。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TxType {
+    /// 普通转账交易
     Transfer,
+    /// 质押交易
     Stake,
+    /// 合约调用交易
     ContractCall,
 }
 
+/// Nonce 管理策略枚举，控制如何维护交易序列号。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NonceStrategy {
+    /// 仅在本地内存中递增 nonce
     Local,
+    /// 每笔交易前查询链上最新 nonce
     Query,
+    /// 乐观本地递增，冲突后回退
     Optimistic,
 }
 
+/// 交易编码格式枚举。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TxEncoding {
+    /// Protobuf 二进制编码
     Proto,
+    /// JSON 文本编码
     Json,
 }
 
+/// 交易压缩方式枚举。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Compression {
+    /// 不压缩
     None,
+    /// Gzip 压缩
     Gzip,
 }
 
+/// 签名算法枚举。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignAlgo {
+    /// Ed25519 签名算法
     Ed25519,
+    /// Secp256k1 签名算法
     Secp256k1,
 }
 
+/// 签名模式枚举。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignMode {
+    /// 直接签名模式
     Direct,
+    /// 遗留签名模式（兼容旧版）
     Legacy,
 }
 
+/// 交易广播模式枚举，决定节点对 BroadcastTx 的响应方式。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BroadcastMode {
+    /// 异步广播，立即返回不等待
     Async,
+    /// 同步广播，等待 CheckTx 结果
     Sync,
+    /// 阻塞广播，等待交易被打包入块
     Block,
 }
 
+/// 限流策略枚举，用于控制交易发送速率。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RateLimitStrategy {
+    /// 令牌桶算法，允许一定突发流量
     TokenBucket,
+    /// 漏桶算法，输出速率更平滑
     LeakyBucket,
 }
 
+/// 账户选择模式枚举，决定如何从账户池中选择发送账户。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountSelectionMode {
+    /// 轮询选择，均匀分布
     RoundRobin,
+    /// 随机选择
     Random,
+    /// 按 Zipf 分布选择，模拟热点账户
     Zipf,
 }
 
+/// 指标导出格式枚举。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportFormat {
+    /// JSON 格式输出
     Json,
+    /// CSV 格式输出
     Csv,
+    /// Prometheus 格式暴露
     Prometheus,
 }
 
+/// 命令行参数结构体，使用 clap 派生宏自动生成 CLI 解析逻辑。
+/// 每个字段对应一个 Config 中的配置项，用于命令行覆盖。
 #[derive(Parser, Debug)]
 #[command(name = "hcp-loadgen", version)]
 struct Cli {
@@ -420,6 +566,7 @@ struct Cli {
 }
 
 impl Default for Config {
+    /// 提供 Config 的默认值，确保所有字段都有合理的初始设置。
     fn default() -> Self {
         Self {
             protocol: Protocol::Http,
@@ -526,6 +673,7 @@ impl Default for Config {
 }
 
 impl Default for OutputConfig {
+    /// OutputConfig 的默认值实现。
     fn default() -> Self {
         Self {
             json_interval_ms: 1000,
@@ -535,11 +683,14 @@ impl Default for OutputConfig {
     }
 }
 
+/// 加载并合并配置：优先从配置文件读取，然后用命令行参数覆盖，最后执行校验。
 pub fn load_config() -> Result<Config> {
     let cli = Cli::parse();
     let mut config = if let Some(path) = cli.config {
+        // 若指定了配置文件，解析 TOML 格式的 FileConfig
         let contents = fs::read_to_string(path)?;
         let mut file_config = toml::from_str::<FileConfig>(&contents)?;
+        // 将 performance 段落的可选值合并到主配置
         if let Some(worker_buffer_capacity) = file_config.performance.worker_buffer_capacity {
             file_config.config.worker_buffer_capacity = worker_buffer_capacity;
         }
@@ -554,6 +705,7 @@ pub fn load_config() -> Result<Config> {
         Config::default()
     };
 
+    // 以下所有 if let 块用于将命令行参数（若存在）覆盖到 config 中
     if let Some(protocol) = cli.protocol {
         config.protocol = parse_protocol(&protocol);
     }
@@ -849,11 +1001,13 @@ pub fn load_config() -> Result<Config> {
         config.output.csv_path = Some(csv_path);
     }
 
+    // 若未指定 account_count 但指定了 accounts_per_worker，则自动计算总账户数
     if config.account_count == 0 && config.accounts_per_worker > 0 {
         let accounts_per_worker = config.accounts_per_worker;
         config.account_count = accounts_per_worker.saturating_mul(config.worker_threads);
     }
 
+    // 以下进行配置合法性校验
     if config.worker_buffer_capacity == 0 {
         return Err(anyhow!("worker_buffer_capacity must be greater than 0"));
     }
@@ -881,6 +1035,7 @@ pub fn load_config() -> Result<Config> {
     Ok(config)
 }
 
+/// 检查字符串是否为合法的数据库标识符（字母、数字、下划线，且不以数字开头）。
 fn is_valid_identifier(value: &str) -> bool {
     let mut chars = value.chars();
     match chars.next() {
@@ -890,6 +1045,7 @@ fn is_valid_identifier(value: &str) -> bool {
     chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
+/// 将字符串解析为 Protocol 枚举，不区分大小写，未知值默认返回 Http。
 fn parse_protocol(value: &str) -> Protocol {
     match value.to_ascii_lowercase().as_str() {
         "grpc" => Protocol::Grpc,
@@ -897,6 +1053,7 @@ fn parse_protocol(value: &str) -> Protocol {
     }
 }
 
+/// 将字符串解析为 SendMode 枚举，不区分大小写，未知值默认返回 Fixed。
 fn parse_mode(value: &str) -> SendMode {
     match value.to_ascii_lowercase().as_str() {
         "burst" => SendMode::Burst,
@@ -906,6 +1063,7 @@ fn parse_mode(value: &str) -> SendMode {
     }
 }
 
+/// 将字符串解析为 TxType 枚举，不区分大小写，未知值默认返回 Transfer。
 fn parse_tx_type(value: &str) -> TxType {
     match value.to_ascii_lowercase().as_str() {
         "stake" => TxType::Stake,
@@ -914,6 +1072,7 @@ fn parse_tx_type(value: &str) -> TxType {
     }
 }
 
+/// 将字符串解析为 NonceStrategy 枚举，不区分大小写，未知值默认返回 Local。
 fn parse_nonce_strategy(value: &str) -> NonceStrategy {
     match value.to_ascii_lowercase().as_str() {
         "query" => NonceStrategy::Query,
@@ -922,6 +1081,7 @@ fn parse_nonce_strategy(value: &str) -> NonceStrategy {
     }
 }
 
+/// 将字符串解析为 TxEncoding 枚举，不区分大小写，未知值默认返回 Json。
 fn parse_tx_encoding(value: &str) -> TxEncoding {
     match value.to_ascii_lowercase().as_str() {
         "proto" => TxEncoding::Proto,
@@ -929,6 +1089,7 @@ fn parse_tx_encoding(value: &str) -> TxEncoding {
     }
 }
 
+/// 将字符串解析为 Compression 枚举，不区分大小写，未知值默认返回 None。
 fn parse_compression(value: &str) -> Compression {
     match value.to_ascii_lowercase().as_str() {
         "gzip" => Compression::Gzip,
@@ -936,6 +1097,7 @@ fn parse_compression(value: &str) -> Compression {
     }
 }
 
+/// 将字符串解析为 SignAlgo 枚举，不区分大小写，未知值默认返回 Ed25519。
 fn parse_sign_algo(value: &str) -> SignAlgo {
     match value.to_ascii_lowercase().as_str() {
         "secp256k1" => SignAlgo::Secp256k1,
@@ -943,6 +1105,7 @@ fn parse_sign_algo(value: &str) -> SignAlgo {
     }
 }
 
+/// 将字符串解析为 SignMode 枚举，不区分大小写，未知值默认返回 Direct。
 fn parse_sign_mode(value: &str) -> SignMode {
     match value.to_ascii_lowercase().as_str() {
         "legacy" => SignMode::Legacy,
@@ -950,6 +1113,7 @@ fn parse_sign_mode(value: &str) -> SignMode {
     }
 }
 
+/// 将字符串解析为 BroadcastMode 枚举，不区分大小写，未知值默认返回 Sync。
 fn parse_broadcast_mode(value: &str) -> BroadcastMode {
     match value.to_ascii_lowercase().as_str() {
         "async" => BroadcastMode::Async,
@@ -958,6 +1122,7 @@ fn parse_broadcast_mode(value: &str) -> BroadcastMode {
     }
 }
 
+/// 将字符串解析为 RateLimitStrategy 枚举，不区分大小写，未知值默认返回 TokenBucket。
 fn parse_rate_limit_strategy(value: &str) -> RateLimitStrategy {
     match value.to_ascii_lowercase().as_str() {
         "leaky_bucket" => RateLimitStrategy::LeakyBucket,
@@ -965,6 +1130,7 @@ fn parse_rate_limit_strategy(value: &str) -> RateLimitStrategy {
     }
 }
 
+/// 将字符串解析为 AccountSelectionMode 枚举，不区分大小写，未知值默认返回 RoundRobin。
 fn parse_account_selection_mode(value: &str) -> AccountSelectionMode {
     match value.to_ascii_lowercase().as_str() {
         "zipf" => AccountSelectionMode::Zipf,
@@ -973,6 +1139,7 @@ fn parse_account_selection_mode(value: &str) -> AccountSelectionMode {
     }
 }
 
+/// 将字符串解析为 ExportFormat 枚举，不区分大小写，未知值默认返回 Json。
 fn parse_export_format(value: &str) -> ExportFormat {
     match value.to_ascii_lowercase().as_str() {
         "csv" => ExportFormat::Csv,
@@ -981,6 +1148,7 @@ fn parse_export_format(value: &str) -> ExportFormat {
     }
 }
 
+/// 将逗号分隔的字符串解析为字符串向量，自动去除空白并过滤空值。
 fn parse_list(value: String) -> Vec<String> {
     value
         .split(',')

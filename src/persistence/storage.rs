@@ -13,22 +13,32 @@ use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
 use tokio_postgres::NoTls;
 
+/// 存储配置，定义数据库连接参数和 schema 行为。
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
+    /// PostgreSQL 数据库连接字符串
     pub database_url: String,
+    /// 数据库 schema 名称
     pub db_schema: String,
+    /// 启动时是否重置 schema（清空已有数据）
     pub reset_schema_on_start: bool,
+    /// 数据库连接池最大连接数
     pub max_connections: u32,
 }
 
+/// 存储层，封装数据库连接池和 schema 操作，提供账户加载与交易持久化功能。
 #[derive(Clone)]
 pub struct Storage {
+    /// 数据库连接字符串（用于 COPY 等独立连接场景）
     database_url: String,
+    /// 使用的 schema 名称
     db_schema: String,
+    /// SQLx 连接池
     pool: PgPool,
 }
 
 impl Storage {
+    /// 创建新的存储层实例，初始化连接池并准备数据库 schema。
     pub async fn new(config: StorageConfig) -> Result<Self> {
         let database_url = config.database_url.clone();
         let db_schema = config.db_schema.clone();
@@ -45,6 +55,7 @@ impl Storage {
         Ok(storage)
     }
 
+    /// 加载初始账户状态：优先从数据库加载，若为空则根据配置生成或从文件导入。
     pub async fn load_initial_state(
         &self,
         account_count: usize,
@@ -59,6 +70,7 @@ impl Storage {
         Ok(AccountPool::from_accounts(accounts))
     }
 
+    /// 批量刷新交易记录、账户身份和最终余额到数据库。
     pub async fn flush_results_to_db(
         &self,
         records: Vec<TransactionRecord>,
@@ -112,6 +124,7 @@ impl Storage {
         Ok(())
     }
 
+    /// 将一批交易记录通过 COPY BINARY 高效写入数据库。
     pub async fn flush_trade_batch(&self, records: Vec<TransactionRecord>) -> Result<()> {
         if records.is_empty() {
             return Ok(());
@@ -120,6 +133,7 @@ impl Storage {
         Ok(())
     }
 
+    /// 从数据库加载已有账户（要求 username 不为 NULL）。
     async fn load_accounts_from_db(&self, initial_nonce: u64) -> Result<Vec<InMemoryAccount>> {
         let load_accounts_sql = format!(
             r#"
@@ -161,6 +175,7 @@ impl Storage {
         Ok(accounts)
     }
 
+    /// 从文件加载账户，若不足则随机生成新账户，直到达到指定数量。
     fn load_or_generate_accounts(
         &self,
         account_count: usize,
@@ -217,6 +232,7 @@ impl Storage {
         Ok(accounts)
     }
 
+    /// 准备数据库 schema：创建 schema、表和索引；若配置要求则先重置。
     async fn prepare_schema(&self, reset_schema_on_start: bool) -> Result<()> {
         let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS {};", self.db_schema);
         sqlx::query(&create_schema_sql).execute(&self.pool).await?;
@@ -296,6 +312,7 @@ impl Storage {
         Ok(())
     }
 
+    /// 使用 PostgreSQL COPY BINARY 协议将交易记录批量写入临时表，再插入到目标 trades 表。
     async fn copy_trades(&self, records: &[TransactionRecord]) -> Result<()> {
         let (mut client, connection) = tokio_postgres::connect(&self.database_url, NoTls).await?;
         tokio::spawn(async move {
@@ -399,12 +416,14 @@ impl Storage {
     }
 }
 
+/// 账户文件中的单条记录格式（JSON Lines）。
 #[derive(Debug, Deserialize)]
 struct AccountFileRecord {
     name: Option<String>,
     address: String,
 }
 
+/// 从私钥派生地址（取 SHA-256 哈希的前 20 字节并编码为 hex）。
 fn derive_address(private_key: &[u8; 32]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(private_key);
@@ -412,6 +431,7 @@ fn derive_address(private_key: &[u8; 32]) -> String {
     hex::encode(&hash[..20])
 }
 
+/// 从文本派生私钥（对文本做 SHA-256 后取完整 32 字节）。
 fn derive_private_key_from_text(text: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());

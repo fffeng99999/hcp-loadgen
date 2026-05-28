@@ -12,51 +12,87 @@ use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
 
+/// 指标收集器的外部句柄，内部通过 Arc 共享状态，支持多线程克隆。
 #[derive(Clone)]
 pub struct Metrics {
     inner: Arc<MetricsInner>,
 }
 
+/// 指标收集器的内部状态，维护发送、成功、失败计数、延迟直方图、系统资源使用及输出目标。
 struct MetricsInner {
+    /// 已发送交易总数
     sent: AtomicU64,
+    /// 成功交易总数
     success: AtomicU64,
+    /// 被拒绝/失败交易总数
     reject: AtomicU64,
+    /// 成功交易的总延迟（微秒）
     total_latency_us: AtomicU64,
+    /// 延迟直方图，用于计算分位值（微秒级）
     latency_hist: Mutex<Histogram<u64>>,
+    /// CPU 使用率（乘以 100 的整数）
     cpu_percent: AtomicU64,
+    /// 内存使用量（字节）
     mem_bytes: AtomicU64,
+    /// 指标收集开始时间
     start: Instant,
+    /// Prometheus 注册表
     registry: Registry,
+    /// Prometheus 计数器：已发送
     prom_sent: IntCounter,
+    /// Prometheus 计数器：成功
     prom_success: IntCounter,
+    /// Prometheus 计数器：被拒绝
     prom_reject: IntCounter,
+    /// Prometheus 延迟直方图向量（按 success/reject 标签区分）
     prom_latency: HistogramVec,
+    /// Prometheus 仪表盘：CPU 使用率
     prom_cpu: IntGauge,
+    /// Prometheus 仪表盘：内存使用量
     prom_mem: IntGauge,
+    /// CSV 写入器（可选）
     csv: Option<Mutex<csv::Writer<File>>>,
+    /// 输出配置
     output: OutputConfig,
+    /// 指标采集间隔（毫秒）
     metrics_interval_ms: u64,
 }
 
+/// 指标快照，用于 JSON 输出、CSV 导出或实时监控。
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsSnapshot {
+    /// 已运行时间（秒）
     pub elapsed_s: f64,
+    /// 已发送交易数
     pub sent: u64,
+    /// 成功交易数
     pub success: u64,
+    /// 被拒绝交易数
     pub reject: u64,
+    /// 实际 TPS（成功交易 / 已运行时间）
     pub actual_tps: f64,
+    /// 成功率
     pub success_rate: f64,
+    /// 拒绝率
     pub reject_rate: f64,
+    /// 平均延迟（毫秒）
     pub latency_avg_ms: f64,
+    /// P50 延迟（毫秒）
     pub latency_p50_ms: f64,
+    /// P90 延迟（毫秒）
     pub latency_p90_ms: f64,
+    /// P95 延迟（毫秒）
     pub latency_p95_ms: f64,
+    /// P99 延迟（毫秒）
     pub latency_p99_ms: f64,
+    /// CPU 使用率（%）
     pub cpu_percent: f64,
+    /// 内存使用量（字节）
     pub mem_bytes: u64,
 }
 
 impl Metrics {
+    /// 创建新的指标收集器，初始化 Prometheus 指标、可选 CSV 文件和延迟直方图。
     pub fn new(output: OutputConfig, metrics_interval_ms: u64) -> Result<Self> {
         let registry = Registry::new();
         let prom_sent = IntCounter::new("hcp_loadgen_sent_total", "sent total")?;
@@ -123,11 +159,13 @@ impl Metrics {
         })
     }
 
+    /// 记录一笔已发送的交易。
     pub fn record_sent(&self) {
         self.inner.sent.fetch_add(1, Ordering::Relaxed);
         self.inner.prom_sent.inc();
     }
 
+    /// 记录一笔成功的交易及其延迟。
     pub fn record_success(&self, latency_ms: f64) {
         let latency_us = (latency_ms * 1000.0) as u64;
         self.inner.success.fetch_add(1, Ordering::Relaxed);
@@ -142,6 +180,7 @@ impl Metrics {
         }
     }
 
+    /// 记录一笔被拒绝或失败的交易及其延迟。
     pub fn record_reject(&self, latency_ms: f64) {
         let latency_us = (latency_ms * 1000.0) as u64;
         self.inner.reject.fetch_add(1, Ordering::Relaxed);
@@ -155,6 +194,7 @@ impl Metrics {
         }
     }
 
+    /// 获取当前指标快照，计算 TPS、成功率、延迟分位值和系统资源使用。
     pub fn snapshot(&self) -> MetricsSnapshot {
         let sent = self.inner.sent.load(Ordering::Relaxed);
         let success = self.inner.success.load(Ordering::Relaxed);
@@ -213,6 +253,7 @@ impl Metrics {
         }
     }
 
+    /// 启动后台任务：定期采集系统资源（CPU/内存）、输出 JSON/CSV 指标，以及暴露 Prometheus 端点。
     pub fn start_background(&self) {
         let metrics = self.clone();
         tokio::spawn(async move {
@@ -274,6 +315,7 @@ impl Metrics {
     }
 }
 
+/// 将 Prometheus 注册表中的指标编码为文本格式。
 fn encode_metrics(registry: &Registry) -> String {
     let encoder = TextEncoder::new();
     let metric_families = registry.gather();
