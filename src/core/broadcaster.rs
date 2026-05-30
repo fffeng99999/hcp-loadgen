@@ -1,9 +1,15 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use crate::config::BroadcastMode as ConfigBroadcastMode;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::service_client::ServiceClient;
 use cosmos_sdk_proto::cosmos::tx::v1beta1::{BroadcastMode as ProtoBroadcastMode, BroadcastTxRequest};
+use quinn::crypto::rustls::QuicClientConfig;
+use quinn::{ClientConfig, Connection, Endpoint};
 use reqwest::Client;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
@@ -111,5 +117,105 @@ impl Broadcaster for GrpcBroadcaster {
             latency_ms,
             success,
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct QuicBroadcaster {
+    connection: Connection,
+    _endpoint: Endpoint,
+}
+
+impl QuicBroadcaster {
+    pub async fn new(endpoint: String) -> Result<Self> {
+        let remote_addr = parse_quic_addr(&endpoint)?;
+        let mut endpoint = Endpoint::client("[::]:0".parse()?)?;
+        endpoint.set_default_client_config(insecure_quic_client_config());
+        let connection = endpoint.connect(remote_addr, "hcp-bench")?.await?;
+        Ok(Self {
+            connection,
+            _endpoint: endpoint,
+        })
+    }
+}
+
+#[async_trait]
+impl Broadcaster for QuicBroadcaster {
+    async fn send(&self, payload: Vec<u8>) -> Result<SendResult> {
+        let start = Instant::now();
+        let (mut send, mut recv) = self.connection.open_bi().await?;
+        send.write_all(&payload).await?;
+        send.finish()?;
+        let response = recv.read_to_end(16 * 1024).await?;
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+        Ok(SendResult {
+            latency_ms,
+            success: response.starts_with(b"OK"),
+        })
+    }
+}
+
+fn parse_quic_addr(endpoint: &str) -> Result<SocketAddr> {
+    let endpoint = endpoint
+        .strip_prefix("quic://")
+        .or_else(|| endpoint.strip_prefix("udp://"))
+        .unwrap_or(endpoint);
+    endpoint
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow!("invalid QUIC endpoint: {}", endpoint))
+}
+
+fn insecure_quic_client_config() -> ClientConfig {
+    let mut crypto = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
+        .with_no_client_auth();
+    crypto.alpn_protocols = vec![b"hcp-quic".to_vec()];
+    ClientConfig::new(Arc::new(
+        QuicClientConfig::try_from(crypto).expect("valid QUIC client config"),
+    ))
+}
+
+#[derive(Debug)]
+struct SkipServerVerification;
+
+impl ServerCertVerifier for SkipServerVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> std::result::Result<ServerCertVerified, TlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::ED25519,
+        ]
     }
 }

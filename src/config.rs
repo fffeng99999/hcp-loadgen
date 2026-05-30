@@ -15,6 +15,7 @@ pub struct Config {
     pub http_endpoint: String,
     /// gRPC 交易广播端点地址
     pub grpc_endpoint: String,
+    pub quic_endpoint: String,
     /// Tendermint RPC 端点地址（用于查询账户状态等）
     pub rpc_endpoint: String,
     /// 目标链的 chain_id
@@ -236,6 +237,7 @@ struct FileConfig {
 pub enum Protocol {
     Http,
     Grpc,
+    Quic,
 }
 
 /// 交易发送模式枚举，决定交易流量的时间分布特征。
@@ -375,6 +377,8 @@ struct Cli {
     http_endpoint: Option<String>,
     #[arg(long)]
     grpc_endpoint: Option<String>,
+    #[arg(long)]
+    quic_endpoint: Option<String>,
     #[arg(long)]
     rpc_endpoint: Option<String>,
     #[arg(long)]
@@ -572,6 +576,7 @@ impl Default for Config {
             protocol: Protocol::Http,
             http_endpoint: "http://127.0.0.1:8080/tx".to_string(),
             grpc_endpoint: "http://127.0.0.1:9090".to_string(),
+            quic_endpoint: "127.0.0.1:8443".to_string(),
             rpc_endpoint: "tcp://127.0.0.1:26657".to_string(),
             chain_id: "hcp-testnet-1".to_string(),
             keyring_backend: "test".to_string(),
@@ -714,6 +719,9 @@ pub fn load_config() -> Result<Config> {
     }
     if let Some(grpc_endpoint) = cli.grpc_endpoint {
         config.grpc_endpoint = grpc_endpoint;
+    }
+    if let Some(quic_endpoint) = cli.quic_endpoint {
+        config.quic_endpoint = quic_endpoint;
     }
     if let Some(rpc_endpoint) = cli.rpc_endpoint {
         config.rpc_endpoint = rpc_endpoint;
@@ -1049,6 +1057,7 @@ fn is_valid_identifier(value: &str) -> bool {
 fn parse_protocol(value: &str) -> Protocol {
     match value.to_ascii_lowercase().as_str() {
         "grpc" => Protocol::Grpc,
+        "quic" => Protocol::Quic,
         _ => Protocol::Http,
     }
 }

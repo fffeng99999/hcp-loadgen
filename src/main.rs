@@ -21,7 +21,7 @@ mod types;          // 核心数据结构：账户、交易记录、余额快照
 use account_pool::AccountPool;
 use anyhow::Result;
 use config::{load_config, Protocol};
-use core::broadcaster::{Broadcaster, GrpcBroadcaster, HttpBroadcaster};
+use core::broadcaster::{Broadcaster, GrpcBroadcaster, HttpBroadcaster, QuicBroadcaster};
 use core::scheduler::Scheduler;
 use metrics::Metrics;
 use persistence::storage::{Storage, StorageConfig};
@@ -131,6 +131,7 @@ async fn main() -> Result<()> {
         Protocol::Grpc => Arc::new(
             GrpcBroadcaster::new(config.grpc_endpoint.clone(), config.broadcast_mode.clone()).await?,
         ),
+        Protocol::Quic => Arc::new(QuicBroadcaster::new(config.quic_endpoint.clone()).await?),
     };
 
     // 背压计数器：记录当前待持久化的交易记录数量
