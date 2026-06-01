@@ -1000,7 +1000,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hcp-loadgen"
+name = "hcap-loadgen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
