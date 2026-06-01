@@ -1,6 +1,6 @@
-# hcp-loadgen
+# hcap-loadgen
           
-`hcp-loadgen` 是一个用 Rust 编写的**高并发交易负载生成器**，用于向 HCP 区块链节点发送压力测试交易。以下是详细的代码结构和功能解析：
+`hcap-loadgen` 是一个用 Rust 编写的**高并发交易负载生成器**，用于向 HCP 区块链节点发送压力测试交易。以下是详细的代码结构和功能解析：
 
 ---
 
@@ -19,7 +19,7 @@
 ## 二、模块结构
 
 ```
-hcp-loadgen/
+hcap-loadgen/
 ├── Cargo.toml              # 依赖配置
 ├── src/
 │   ├── main.rs             # 程序入口与主流程编排
@@ -46,7 +46,7 @@ hcp-loadgen/
 
 ## 三、各模块详解
 
-### 1. [main.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/main.rs) — 主流程
+### 1. [main.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/main.rs) — 主流程
 
 主函数按以下顺序执行：
 
@@ -69,7 +69,7 @@ hcp-loadgen/
 
 ---
 
-### 2. [config.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/config.rs) — 配置系统
+### 2. [config.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/config.rs) — 配置系统
 
 配置通过 **TOML 文件 + 环境变量 + 命令行参数** 加载，主要字段：
 
@@ -89,7 +89,7 @@ hcp-loadgen/
 
 ---
 
-### 3. [types.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/types.rs) — 核心数据结构
+### 3. [types.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/types.rs) — 核心数据结构
 
 ```rust
 InMemoryAccount          # 内存账户（含 nonce、余额、私钥）
@@ -102,7 +102,7 @@ AccountIdentity          # 账户身份
 
 ---
 
-### 4. [account_pool.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/account_pool.rs) — 账户池
+### 4. [account_pool.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/account_pool.rs) — 账户池
 
 管理所有测试账户，支持三种选择策略：
 
@@ -116,7 +116,7 @@ AccountIdentity          # 账户身份
 
 ---
 
-### 5. [core/scheduler.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/core/scheduler.rs) — 调度器
+### 5. [core/scheduler.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/core/scheduler.rs) — 调度器
 
 控制交易发送节奏，支持四种模式：
 
@@ -146,7 +146,7 @@ AccountIdentity          # 账户身份
 
 ---
 
-### 6. [core/tx_builder.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/core/tx_builder.rs) — 交易构建
+### 6. [core/tx_builder.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/core/tx_builder.rs) — 交易构建
 
 - 支持 **Cosmos SDK** 标准交易格式（`MsgSend`）
 - 使用 `prost` 进行 Protobuf 编码
@@ -155,13 +155,13 @@ AccountIdentity          # 账户身份
 
 ---
 
-### 7. [core/signer.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/core/signer.rs) — 签名器
+### 7. [core/signer.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/core/signer.rs) — 签名器
 
 极简实现：使用 `Sha256(private_key || data)` 生成签名。生产环境可替换为真实加密库（如 `secp256k1`、`ed25519`）。
 
 ---
 
-### 8. [core/broadcaster.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/core/broadcaster.rs) — 广播器
+### 8. [core/broadcaster.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/core/broadcaster.rs) — 广播器
 
 定义 `Broadcaster` trait，两种实现：
 
@@ -174,7 +174,7 @@ AccountIdentity          # 账户身份
 
 ---
 
-### 9. [metrics.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/metrics.rs) — 指标系统
+### 9. [metrics.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/metrics.rs) — 指标系统
 
 多维度指标采集：
 
@@ -193,7 +193,7 @@ AccountIdentity          # 账户身份
 
 ---
 
-### 10. [persistence/storage.rs](file:///f:/hcp-project-experiment/hcp-loadgen/src/persistence/storage.rs) — 持久化
+### 10. [persistence/storage.rs](file:///f:/hcap-project-experiment/hcap-loadgen/src/persistence/storage.rs) — 持久化
 
 PostgreSQL 存储层，功能：
 

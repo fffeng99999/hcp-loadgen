@@ -30,7 +30,7 @@ struct WorkerRuntime {
     handles: Vec<JoinHandle<()>>,
 }
 
-/// CLI 签名上下文，当使用外部二进制（如 hcpd）进行签名时所需参数。
+/// CLI 签名上下文，当使用外部二进制（如 hcapd）进行签名时所需参数。
 #[derive(Clone)]
 struct CliSigningContext {
     cli_binary: String,
@@ -461,7 +461,7 @@ fn resolve_account_info(genesis_path: &std::path::Path, address: &str) -> Option
     None
 }
 
-/// 使用外部 CLI（hcpd）构建并签名交易，返回编码后的交易字节。
+/// 使用外部 CLI（hcapd）构建并签名交易，返回编码后的交易字节。
 async fn build_cli_tx_bytes(
     signing: &CliSigningContext,
     from_name: &str,

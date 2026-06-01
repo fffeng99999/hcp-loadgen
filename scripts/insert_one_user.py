@@ -6,7 +6,7 @@ import uuid
 import psycopg2
 
 
-TARGET_DATABASE = "hcp_server"
+TARGET_DATABASE = "hcap_server"
 TARGET_SCHEMA = "loadgendata"
 DEFAULT_DSN = f"postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/{TARGET_DATABASE}?sslmode=disable"
 

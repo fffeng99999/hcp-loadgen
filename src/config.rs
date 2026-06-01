@@ -26,7 +26,7 @@ pub struct Config {
     pub keyring_home: Option<String>,
     /// 预生成账户数据文件路径（可选）
     pub account_file: Option<String>,
-    /// 链客户端二进制名称或路径，默认从环境变量 HCPD_BINARY 读取，否则为 "hcpd"
+    /// 链客户端二进制名称或路径，默认从环境变量 HCPD_BINARY 读取，否则为 "hcapd"
     pub cli_binary: String,
     /// 交易发送模式：Fixed（固定间隔）、Burst（突发）、Sustained（持续）、Jitter（抖动）
     pub mode: SendMode,
@@ -82,7 +82,7 @@ pub struct Config {
     pub fee_amount: u64,
     /// 转账金额
     pub send_amount: u64,
-    /// 代币最小单位名称，如 "uhcp"
+    /// 代币最小单位名称，如 "uhcap"
     pub denom: String,
     /// 交易备注（memo）的大小（字节）
     pub memo_size: usize,
@@ -367,7 +367,7 @@ pub enum ExportFormat {
 /// 命令行参数结构体，使用 clap 派生宏自动生成 CLI 解析逻辑。
 /// 每个字段对应一个 Config 中的配置项，用于命令行覆盖。
 #[derive(Parser, Debug)]
-#[command(name = "hcp-loadgen", version)]
+#[command(name = "hcap-loadgen", version)]
 struct Cli {
     #[arg(long)]
     config: Option<PathBuf>,
@@ -578,11 +578,11 @@ impl Default for Config {
             grpc_endpoint: "http://127.0.0.1:9090".to_string(),
             quic_endpoint: "127.0.0.1:8443".to_string(),
             rpc_endpoint: "tcp://127.0.0.1:26657".to_string(),
-            chain_id: "hcp-testnet-1".to_string(),
+            chain_id: "hcap-testnet-1".to_string(),
             keyring_backend: "test".to_string(),
             keyring_home: None,
             account_file: None,
-            cli_binary: std::env::var("HCPD_BINARY").unwrap_or_else(|_| "hcpd".to_string()),
+            cli_binary: std::env::var("HCPD_BINARY").unwrap_or_else(|_| "hcapd".to_string()),
             mode: SendMode::Fixed,
             target_tps: 1000,
             duration: 0,
@@ -610,7 +610,7 @@ impl Default for Config {
             gas_limit: 200_000,
             fee_amount: 1,
             send_amount: 1,
-            denom: "uhcp".to_string(),
+            denom: "uhcap".to_string(),
             memo_size: 0,
             timeout_height: 0,
             extension_options: Vec::new(),
@@ -662,7 +662,7 @@ impl Default for Config {
             account_selection_mode: AccountSelectionMode::RoundRobin,
             zipf_alpha: 0.0,
             worker_buffer_capacity: 1000,
-            database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcp_server?sslmode=disable&search_path=loadgendata,public".to_string(),
+            database_url: "postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/hcap_server?sslmode=disable&search_path=loadgendata,public".to_string(),
             db_schema: "loadgendata".to_string(),
             reset_schema_on_start: false,
             storage_flush_interval_ms: 2000,

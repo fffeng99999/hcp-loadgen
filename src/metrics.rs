@@ -95,15 +95,15 @@ impl Metrics {
     /// 创建新的指标收集器，初始化 Prometheus 指标、可选 CSV 文件和延迟直方图。
     pub fn new(output: OutputConfig, metrics_interval_ms: u64) -> Result<Self> {
         let registry = Registry::new();
-        let prom_sent = IntCounter::new("hcp_loadgen_sent_total", "sent total")?;
-        let prom_success = IntCounter::new("hcp_loadgen_success_total", "success total")?;
-        let prom_reject = IntCounter::new("hcp_loadgen_reject_total", "reject total")?;
+        let prom_sent = IntCounter::new("hcap_loadgen_sent_total", "sent total")?;
+        let prom_success = IntCounter::new("hcap_loadgen_success_total", "success total")?;
+        let prom_reject = IntCounter::new("hcap_loadgen_reject_total", "reject total")?;
         let prom_latency = HistogramVec::new(
-            HistogramOpts::new("hcp_loadgen_latency_ms", "latency ms"),
+            HistogramOpts::new("hcap_loadgen_latency_ms", "latency ms"),
             &["result"],
         )?;
-        let prom_cpu = IntGauge::new("hcp_loadgen_cpu_percent", "cpu percent")?;
-        let prom_mem = IntGauge::new("hcp_loadgen_mem_bytes", "mem bytes")?;
+        let prom_cpu = IntGauge::new("hcap_loadgen_cpu_percent", "cpu percent")?;
+        let prom_mem = IntGauge::new("hcap_loadgen_mem_bytes", "mem bytes")?;
         registry.register(Box::new(prom_sent.clone()))?;
         registry.register(Box::new(prom_success.clone()))?;
         registry.register(Box::new(prom_reject.clone()))?;

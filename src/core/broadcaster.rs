@@ -131,7 +131,7 @@ impl QuicBroadcaster {
         let remote_addr = parse_quic_addr(&endpoint)?;
         let mut endpoint = Endpoint::client("[::]:0".parse()?)?;
         endpoint.set_default_client_config(insecure_quic_client_config());
-        let connection = endpoint.connect(remote_addr, "hcp-bench")?.await?;
+        let connection = endpoint.connect(remote_addr, "hcap-bench")?.await?;
         Ok(Self {
             connection,
             _endpoint: endpoint,
@@ -171,7 +171,7 @@ fn insecure_quic_client_config() -> ClientConfig {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
         .with_no_client_auth();
-    crypto.alpn_protocols = vec![b"hcp-quic".to_vec()];
+    crypto.alpn_protocols = vec![b"hcap-quic".to_vec()];
     ClientConfig::new(Arc::new(
         QuicClientConfig::try_from(crypto).expect("valid QUIC client config"),
     ))

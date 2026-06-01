@@ -8,7 +8,7 @@ from typing import Dict, List
 import psycopg2
 
 
-TARGET_DATABASE = "hcp_server"
+TARGET_DATABASE = "hcap_server"
 TARGET_SCHEMA = "loadgendata"
 USER_COUNT = 10
 DEFAULT_DSN = f"postgres://user_rbc3B8:password_DfA4Pw@192.168.58.102:5432/{TARGET_DATABASE}?sslmode=disable"
@@ -69,14 +69,14 @@ def seed_data(dsn: str) -> Dict[str, int]:
                 account_ids.append(cur.fetchone()[0])
 
             for idx, account_id in enumerate(account_ids, start=1):
-                available_hcp = Decimal("100000.00000000") + Decimal(idx * 1000)
+                available_hcap = Decimal("100000.00000000") + Decimal(idx * 1000)
                 available_usdt = Decimal("50000.00000000") + Decimal(idx * 500)
                 cur.execute(
                     """
                     INSERT INTO loadgendata.balances (account_id, asset_symbol, available, frozen)
                     VALUES (%s, %s, %s, %s);
                     """,
-                    (account_id, "HCP", available_hcp, Decimal("0.00000000")),
+                    (account_id, "HCP", available_hcap, Decimal("0.00000000")),
                 )
                 cur.execute(
                     """
